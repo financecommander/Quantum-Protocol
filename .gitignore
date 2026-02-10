@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+Cargo.lock
+__pycache__
+*.pyc
+.pytest_cache
+*.egg-info
+dist/
+build/
+quantum_weights.json
+.env
+*.log
