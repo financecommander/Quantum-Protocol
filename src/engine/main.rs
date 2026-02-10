@@ -10,7 +10,6 @@
 
 use std::net::UdpSocket;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Instant;
 
 // ---------------------------------------------------------------------------
 // Market Data Structures (zero-copy compatible)
@@ -430,7 +429,6 @@ fn main() {
         match socket.recv_from(&mut buf) {
             Ok((n, _src)) => {
                 if let Some(packet) = Engine::parse_udp_packet(&buf[..n]) {
-                    let _start = Instant::now();
                     engine.ring.push(packet);
                     engine.on_tick(&packet);
                 }

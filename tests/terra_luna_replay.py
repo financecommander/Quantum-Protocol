@@ -29,17 +29,6 @@ def simulate_engine_crisis_check(vix: float, depeg_pct: float) -> str:
     return "Normal"
 
 
-def simulate_vol_regime(vix: float) -> str:
-    """Simulate vol regime classification."""
-    low = _shared_config["vol_regime_threshold_low"]
-    high = _shared_config["vol_regime_threshold_high"]
-    if vix < low:
-        return "Low"
-    elif vix > high:
-        return "High"
-    return "Neutral"
-
-
 def run_terra_luna_replay():
     """
     Simulate the Terra Luna crash timeline:
