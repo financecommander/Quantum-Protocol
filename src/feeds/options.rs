@@ -248,11 +248,37 @@ mod tests {
         let vix_calls = feed.get_vix_calls(current_vix, strike_offset);
 
         // Strike threshold = 20 + 10 = 30
-        // Should get 30 and 35 calls (strike > 30 means strictly greater, so 30.0 is NOT included)
-        // Actually, the function uses > not >=, so we need strikes > 30
-        // That means only 35 should match
+        // Filter uses > (strictly greater than), so only strike 35 should match
+        // Strikes 25 and 30 should be excluded
         assert_eq!(vix_calls.len(), 1);
         assert_eq!(vix_calls[0].strike, 35.0);
+        
+        // Verify excluded strikes are not in results
+        assert!(!vix_calls.iter().any(|q| q.strike == 25.0));
+        assert!(!vix_calls.iter().any(|q| q.strike == 30.0));
+    }
+
+    #[tokio::test]
+    async fn test_get_vix_calls_boundary() {
+        let (tx, _rx) = mpsc::channel(10);
+        let mut feed = OptionChainFeed::new(tx);
+
+        let current_vix = 20.0;
+        let strike_offset = 10.0;
+
+        // Test boundary condition: strike exactly at threshold
+        feed.handle_quote(create_test_option("VIX_C30", "VIX", 30.0, OptionType::Call))
+            .await
+            .unwrap();
+        feed.handle_quote(create_test_option("VIX_C30_01", "VIX", 30.01, OptionType::Call))
+            .await
+            .unwrap();
+
+        let vix_calls = feed.get_vix_calls(current_vix, strike_offset);
+
+        // With > comparison, exactly 30.0 should be excluded
+        assert_eq!(vix_calls.len(), 1);
+        assert_eq!(vix_calls[0].strike, 30.01);
     }
 
     #[tokio::test]

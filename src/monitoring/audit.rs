@@ -138,9 +138,12 @@ impl AuditLogger {
                     if filename.starts_with("audit_") && filename.ends_with(".jsonl") {
                         let date_str = &filename[6..filename.len() - 6]; // Remove "audit_" and ".jsonl"
                         if let Ok(file_date) = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-                            let file_datetime = file_date.and_hms_opt(0, 0, 0).unwrap().and_utc();
-                            if file_datetime >= start_date && file_datetime <= end_date {
-                                logs.push(path);
+                            // Use and_hms_opt with proper error handling
+                            if let Some(naive_dt) = file_date.and_hms_opt(0, 0, 0) {
+                                let file_datetime = naive_dt.and_utc();
+                                if file_datetime >= start_date && file_datetime <= end_date {
+                                    logs.push(path);
+                                }
                             }
                         }
                     }
