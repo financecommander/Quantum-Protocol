@@ -28,9 +28,9 @@ pub struct HedgePosition {
     pub notional: f64,
     pub strike: f64,
     pub expiry_days: u16,
-    pub cost_bps: f64,           // Cost in basis points
-    pub delta: f64,              // Position delta
-    pub vega: f64,               // Position vega
+    pub cost_bps: f64,  // Cost in basis points
+    pub delta: f64,     // Position delta
+    pub vega: f64,      // Position vega
 }
 
 impl Default for HedgePosition {
@@ -89,14 +89,14 @@ impl Default for TailEvent {
 // ---------------------------------------------------------------------------
 
 pub struct TailHedgingEngine {
-    pub positions: [HedgePosition; 8],     // Up to 8 hedge positions
-    pub events: [TailEvent; 32],           // Recent tail events
+    pub positions: [HedgePosition; 8],    // Up to 8 hedge positions
+    pub events: [TailEvent; 32],          // Recent tail events
     pub num_positions: usize,
     pub num_events: usize,
     pub current_risk_level: TailRiskLevel,
     pub total_hedge_cost: f64,
     pub total_hedge_pnl: f64,
-    pub vix_ema: f64,                      // Exponential moving average of VIX
+    pub vix_ema: f64,  // Exponential moving average of VIX
     pub last_vix: f64,
 }
 
@@ -112,8 +112,8 @@ impl TailHedgingEngine {
     pub const VIX_THRESHOLD_ELEVATED: f64 = 20.0;
     pub const VIX_THRESHOLD_HIGH: f64 = 30.0;
     pub const VIX_THRESHOLD_CRITICAL: f64 = 45.0;
-    pub const VIX_SPIKE_PCT: f64 = 20.0;  // 20% VIX increase
-    pub const EMA_ALPHA: f64 = 0.1;        // EMA smoothing factor
+    pub const VIX_SPIKE_PCT: f64 = 20.0; // 20% VIX increase
+    pub const EMA_ALPHA: f64 = 0.1; // EMA smoothing factor
 
     pub fn new() -> Self {
         Self {
@@ -124,7 +124,7 @@ impl TailHedgingEngine {
             current_risk_level: TailRiskLevel::Normal,
             total_hedge_cost: 0.0,
             total_hedge_pnl: 0.0,
-            vix_ema: 15.0,  // Initialize to typical low-vol level
+            vix_ema: 15.0, // Initialize to typical low-vol level
             last_vix: 15.0,
         }
     }
@@ -133,21 +133,21 @@ impl TailHedgingEngine {
     pub fn update_vix(&mut self, vix: f64, timestamp_ns: u64) -> Option<TailEvent> {
         // Update EMA
         self.vix_ema = Self::EMA_ALPHA * vix + (1.0 - Self::EMA_ALPHA) * self.vix_ema;
-        
+
         // Calculate VIX change
         let vix_change_pct = if self.last_vix > 0.0 {
             ((vix - self.last_vix) / self.last_vix) * 100.0
         } else {
             0.0
         };
-        
+
         // Determine risk level
         let risk_level = self.classify_risk(vix);
         let prev_risk_level = self.current_risk_level;
         self.current_risk_level = risk_level;
-        
+
         self.last_vix = vix;
-        
+
         // Detect tail event (VIX spike or critical level)
         if vix_change_pct > Self::VIX_SPIKE_PCT || risk_level == TailRiskLevel::Critical {
             let event = TailEvent {
@@ -158,18 +158,18 @@ impl TailHedgingEngine {
                 market_drop_pct: 0.0, // Would be calculated from market data
                 triggered_hedges: 0,
             };
-            
+
             if self.num_events < Self::MAX_EVENTS {
                 self.events[self.num_events] = event;
                 self.num_events += 1;
             }
-            
+
             // Escalation from lower to higher risk
             if risk_level as u8 > prev_risk_level as u8 {
                 return Some(event);
             }
         }
-        
+
         None
     }
 
@@ -191,11 +191,11 @@ impl TailHedgingEngine {
         if self.num_positions >= Self::MAX_POSITIONS {
             return false;
         }
-        
+
         self.positions[self.num_positions] = position;
         self.num_positions += 1;
         self.total_hedge_cost += position.cost_bps;
-        
+
         true
     }
 
@@ -203,10 +203,10 @@ impl TailHedgingEngine {
     pub fn remove_expired_hedges(&mut self) -> usize {
         let mut write_idx = 0;
         let mut removed = 0;
-        
+
         for read_idx in 0..self.num_positions {
             let pos = &self.positions[read_idx];
-            
+
             if pos.expiry_days > 0 {
                 if write_idx != read_idx {
                     self.positions[write_idx] = *pos;
@@ -216,7 +216,7 @@ impl TailHedgingEngine {
                 removed += 1;
             }
         }
-        
+
         self.num_positions = write_idx;
         removed
     }
@@ -224,12 +224,12 @@ impl TailHedgingEngine {
     /// Calculate recommended hedge size based on risk level
     pub fn recommended_hedge_notional(&self, portfolio_value: f64) -> f64 {
         let hedge_pct = match self.current_risk_level {
-            TailRiskLevel::Normal => 0.01,      // 1% of portfolio
-            TailRiskLevel::Elevated => 0.03,    // 3% of portfolio
-            TailRiskLevel::High => 0.05,        // 5% of portfolio
-            TailRiskLevel::Critical => 0.10,    // 10% of portfolio
+            TailRiskLevel::Normal => 0.01,   // 1% of portfolio
+            TailRiskLevel::Elevated => 0.03, // 3% of portfolio
+            TailRiskLevel::High => 0.05,     // 5% of portfolio
+            TailRiskLevel::Critical => 0.10, // 10% of portfolio
         };
-        
+
         portfolio_value * hedge_pct
     }
 
@@ -258,9 +258,9 @@ impl TailHedgingEngine {
             .iter()
             .map(|p| p.notional)
             .sum();
-        
+
         let mut actions = Vec::new();
-        
+
         if (current_notional - recommended).abs() > recommended * 0.1 {
             // Need to rebalance (>10% deviation)
             if current_notional < recommended {
@@ -268,7 +268,7 @@ impl TailHedgingEngine {
                 let new_position = HedgePosition {
                     instrument: HedgeInstrument::SpxPut,
                     notional: recommended - current_notional,
-                    strike: 0.0,  // Would be calculated from market
+                    strike: 0.0, // Would be calculated from market
                     expiry_days: 30,
                     cost_bps: 50.0,
                     delta: -0.3,
@@ -278,7 +278,7 @@ impl TailHedgingEngine {
             }
             // Note: In production, would also handle reducing hedges
         }
-        
+
         actions
     }
 
@@ -324,9 +324,9 @@ mod tests {
     #[test]
     fn test_update_vix_normal() {
         let mut engine = TailHedgingEngine::new();
-        
+
         let event = engine.update_vix(18.0, 1000);
-        
+
         assert!(event.is_none());
         assert_eq!(engine.current_risk_level, TailRiskLevel::Normal);
         assert_eq!(engine.last_vix, 18.0);
@@ -336,10 +336,10 @@ mod tests {
     fn test_update_vix_spike() {
         let mut engine = TailHedgingEngine::new();
         engine.last_vix = 15.0;
-        
+
         // 50% spike triggers event
         let event = engine.update_vix(22.5, 1000);
-        
+
         assert!(event.is_some());
         if let Some(e) = event {
             assert!(e.vix_change_pct > 20.0);
@@ -350,9 +350,9 @@ mod tests {
     #[test]
     fn test_update_vix_critical() {
         let mut engine = TailHedgingEngine::new();
-        
+
         let event = engine.update_vix(50.0, 1000);
-        
+
         assert!(event.is_some());
         assert_eq!(engine.current_risk_level, TailRiskLevel::Critical);
     }
@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn test_classify_risk() {
         let engine = TailHedgingEngine::new();
-        
+
         assert_eq!(engine.classify_risk(15.0), TailRiskLevel::Normal);
         assert_eq!(engine.classify_risk(25.0), TailRiskLevel::Elevated);
         assert_eq!(engine.classify_risk(35.0), TailRiskLevel::High);
@@ -370,7 +370,7 @@ mod tests {
     #[test]
     fn test_add_hedge() {
         let mut engine = TailHedgingEngine::new();
-        
+
         let position = HedgePosition {
             instrument: HedgeInstrument::SpxPut,
             notional: 100_000.0,
@@ -380,7 +380,7 @@ mod tests {
             delta: -0.3,
             vega: 0.5,
         };
-        
+
         assert!(engine.add_hedge(position));
         assert_eq!(engine.num_positions, 1);
         assert_eq!(engine.total_hedge_cost, 50.0);
@@ -389,14 +389,14 @@ mod tests {
     #[test]
     fn test_add_hedge_max_limit() {
         let mut engine = TailHedgingEngine::new();
-        
+
         let position = HedgePosition::default();
-        
+
         // Fill to capacity
         for _ in 0..TailHedgingEngine::MAX_POSITIONS {
             assert!(engine.add_hedge(position));
         }
-        
+
         // Should fail when full
         assert!(!engine.add_hedge(position));
     }
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn test_remove_expired_hedges() {
         let mut engine = TailHedgingEngine::new();
-        
+
         // Add active hedge
         let active = HedgePosition {
             instrument: HedgeInstrument::SpxPut,
@@ -416,21 +416,21 @@ mod tests {
             vega: 0.5,
         };
         engine.add_hedge(active);
-        
+
         // Add expired hedge
         let expired = HedgePosition {
             instrument: HedgeInstrument::SpxPut,
             notional: 50_000.0,
             strike: 3900.0,
-            expiry_days: 0,  // Expired
+            expiry_days: 0, // Expired
             cost_bps: 30.0,
             delta: -0.2,
             vega: 0.3,
         };
         engine.add_hedge(expired);
-        
+
         let removed = engine.remove_expired_hedges();
-        
+
         assert_eq!(removed, 1);
         assert_eq!(engine.num_positions, 1);
         assert_eq!(engine.positions[0].expiry_days, 30);
@@ -440,16 +440,16 @@ mod tests {
     fn test_recommended_hedge_notional() {
         let mut engine = TailHedgingEngine::new();
         let portfolio = 1_000_000.0;
-        
+
         engine.current_risk_level = TailRiskLevel::Normal;
         assert_eq!(engine.recommended_hedge_notional(portfolio), 10_000.0);
-        
+
         engine.current_risk_level = TailRiskLevel::Elevated;
         assert_eq!(engine.recommended_hedge_notional(portfolio), 30_000.0);
-        
+
         engine.current_risk_level = TailRiskLevel::High;
         assert_eq!(engine.recommended_hedge_notional(portfolio), 50_000.0);
-        
+
         engine.current_risk_level = TailRiskLevel::Critical;
         assert_eq!(engine.recommended_hedge_notional(portfolio), 100_000.0);
     }
@@ -457,7 +457,7 @@ mod tests {
     #[test]
     fn test_total_delta() {
         let mut engine = TailHedgingEngine::new();
-        
+
         let pos1 = HedgePosition {
             instrument: HedgeInstrument::SpxPut,
             notional: 100_000.0,
@@ -467,7 +467,7 @@ mod tests {
             delta: -0.3,
             vega: 0.5,
         };
-        
+
         let pos2 = HedgePosition {
             instrument: HedgeInstrument::VixCall,
             notional: 50_000.0,
@@ -477,17 +477,17 @@ mod tests {
             delta: 0.5,
             vega: 0.8,
         };
-        
+
         engine.add_hedge(pos1);
         engine.add_hedge(pos2);
-        
+
         assert_eq!(engine.total_delta(), 0.2); // -0.3 + 0.5
     }
 
     #[test]
     fn test_total_vega() {
         let mut engine = TailHedgingEngine::new();
-        
+
         let pos1 = HedgePosition {
             instrument: HedgeInstrument::SpxPut,
             notional: 100_000.0,
@@ -497,7 +497,7 @@ mod tests {
             delta: -0.3,
             vega: 0.5,
         };
-        
+
         let pos2 = HedgePosition {
             instrument: HedgeInstrument::VixCall,
             notional: 50_000.0,
@@ -507,10 +507,10 @@ mod tests {
             delta: 0.5,
             vega: 0.8,
         };
-        
+
         engine.add_hedge(pos1);
         engine.add_hedge(pos2);
-        
+
         assert_eq!(engine.total_vega(), 1.3); // 0.5 + 0.8
     }
 
@@ -518,9 +518,9 @@ mod tests {
     fn test_rebalance_hedges() {
         let mut engine = TailHedgingEngine::new();
         engine.current_risk_level = TailRiskLevel::High;
-        
+
         let actions = engine.rebalance_hedges(1_000_000.0);
-        
+
         // Should recommend adding hedges (current is 0, recommended is 50k)
         assert!(!actions.is_empty());
     }
@@ -532,9 +532,9 @@ mod tests {
         engine.total_hedge_cost = 100.0;
         engine.total_hedge_pnl = 50.0;
         engine.current_risk_level = TailRiskLevel::Elevated;
-        
+
         let stats = engine.get_stats();
-        
+
         assert_eq!(stats.num_positions, 2);
         assert_eq!(stats.total_hedge_cost, 100.0);
         assert_eq!(stats.total_hedge_pnl, 50.0);
