@@ -8,6 +8,7 @@
 
 pub mod engine;
 pub mod config;
+pub mod feeds;
 
 // Re-export commonly used types
 pub use engine::*;
