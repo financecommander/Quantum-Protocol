@@ -1,0 +1,119 @@
+# Quantum Protocol HFT Engine Configuration
+# Production-ready TOML configuration with environment variable substitution
+
+[engine]
+# UDP socket address for market data ingestion
+udp_addr = "0.0.0.0:9999"
+
+# Port for Prometheus metrics HTTP endpoint
+metrics_port = 9090
+
+# Graceful shutdown timeout in seconds
+graceful_shutdown_timeout_secs = 30
+
+# ---------------------------------------------------------------------------
+# Trading Sleeves Configuration
+# ---------------------------------------------------------------------------
+
+[sleeves.treasury_basis]
+# Sleeve 1: Treasury Basis Arbitrage
+enabled = true
+hedge_ratio = 0.8
+max_position = 1000000.0
+
+[sleeves.vol_regime]
+# Sleeve 2: Volatility Regime Classification
+enabled = true
+threshold_low = 15.0
+threshold_high = 30.0
+
+[sleeves.prop_scaling]
+# Sleeve 3: Prop Scaling (Master-Satellite)
+enabled = true
+master_account_id = 1
+satellite_account_ids = [2, 3, 4, 5]
+
+[sleeves.rwa_crypto]
+# Sleeve 4: RWA Crypto HFT
+enabled = true
+depeg_threshold = 5.0
+
+[sleeves.tail_hedging]
+# Sleeve 5: Tail Hedging (VIX calls, OTM puts)
+enabled = true
+vix_call_strike_offset = 10.0
+put_strike_offset = 5.0
+
+# ---------------------------------------------------------------------------
+# Risk Management Configuration
+# ---------------------------------------------------------------------------
+
+[risk]
+# Maximum position size per symbol (absolute value)
+max_position_size = 10000
+
+# Maximum notional exposure across all positions
+max_notional = 5000000.0
+
+# Maximum daily loss (negative value) before kill switch triggers
+max_daily_loss = -50000.0
+
+# Number of consecutive rejections before kill switch triggers
+kill_switch_consecutive_rejections = 10
+
+# Heartbeat timeout in milliseconds before kill switch triggers
+kill_switch_heartbeat_timeout_ms = 5000
+
+# ---------------------------------------------------------------------------
+# Monitoring Configuration
+# ---------------------------------------------------------------------------
+
+[monitoring]
+# Directory for audit logs (FINRA 3110 compliance)
+audit_log_dir = "/var/log/quantum-protocol"
+
+# Audit log retention in days (7 years = 2555 days)
+audit_retention_days = 2555
+
+# Enable Prometheus metrics collection
+metrics_enabled = true
+
+# ---------------------------------------------------------------------------
+# Data Feeds Configuration
+# ---------------------------------------------------------------------------
+
+[feeds]
+# WebSocket URL for market data (supports ${ENV_VAR} substitution)
+market_data_ws_url = "${ALPACA_WS_URL}"
+
+# API key for market data authentication
+market_data_api_key = "${ALPACA_API_KEY}"
+
+# Symbols to subscribe to
+symbols = ["SPY", "QQQ", "UVXY", "TLT", "GLD", "UST", "LUNA"]
+
+# Heartbeat interval in milliseconds for connection health check
+heartbeat_interval_ms = 30000
+
+# Maximum reconnection delay in seconds (exponential backoff cap)
+reconnect_max_delay_secs = 60
+
+# ---------------------------------------------------------------------------
+# Alerting Configuration
+# ---------------------------------------------------------------------------
+
+[alerts]
+# Slack webhook URL for alerts (supports ${ENV_VAR} substitution)
+slack_webhook_url = "${SLACK_WEBHOOK_URL}"
+
+# SMTP configuration for email alerts
+smtp_host = "${SMTP_HOST}"
+smtp_port = 587
+smtp_user = "${SMTP_USER}"
+smtp_pass = "${SMTP_PASS}"
+
+# Email recipient for alerts
+alert_email_to = "${ALERT_EMAIL_TO}"
+
+# Alert cooldown period in seconds (prevent spam)
+alert_cooldown_secs = 300

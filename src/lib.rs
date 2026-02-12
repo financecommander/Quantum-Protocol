@@ -7,6 +7,7 @@
 //! and benchmarks.
 
 pub mod engine;
+pub mod config;
 
 // Re-export commonly used types
 pub use engine::*;
