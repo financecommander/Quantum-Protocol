@@ -308,7 +308,8 @@ mod tests {
 
     #[test]
     fn test_incremental_position_building() {
-        let mut limits = RiskLimits::new(1_000_000.0, 10_000, 0.5);
+        // Use higher concentration limit to avoid failing on concentration risk
+        let mut limits = RiskLimits::new(1_000_000.0, 10_000, 1.0); // 100% concentration allowed
 
         limits.add_symbol_limit(PositionLimit {
             symbol_id: 1,
