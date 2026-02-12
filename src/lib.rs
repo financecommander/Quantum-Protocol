@@ -10,6 +10,7 @@ pub mod engine;
 pub mod config;
 pub mod feeds;
 pub mod risk;
+pub mod monitoring;
 
 // Re-export commonly used types
 pub use engine::*;
