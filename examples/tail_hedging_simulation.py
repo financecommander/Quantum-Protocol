@@ -151,13 +151,13 @@ class TailHedgingSimulation:
         for pos in self.positions:
             pos.expiry_days = max(0, pos.expiry_days - 1)
     
-    def simulate_market(self, timestamp: float, crisis_start=500, crisis_duration=100) -> tuple:
+    def simulate_market(self, day: int, crisis_day_start=500, crisis_day_duration=100) -> tuple:
         """Simulate market returns with crisis period"""
         # Normal volatility
         base_vol = 0.01
         
         # Crisis period
-        if crisis_start <= timestamp < crisis_start + crisis_duration:
+        if crisis_day_start <= day < crisis_day_start + crisis_day_duration:
             # VIX spike
             target_vix = 50.0 + np.random.normal(0, 5)
             vix_change = target_vix - self.vix

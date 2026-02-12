@@ -43,7 +43,7 @@ pub fn process_tail_hedging_rebalance(
             event_type: AuditEventType::ConfigUpdate,
             sleeve_id: 5,
             signal_value: expired as f64,
-            position_delta: 0.0,
+            position_delta: expired as f64,  // Track number of hedges removed
             risk_flag: 0,
         });
     }
@@ -191,15 +191,8 @@ mod tests {
         
         process_tail_hedging_rebalance(&mut engine, &packet, &config, &mut audit);
         
-        // Should log removal (expired hedge was removed, may add new ones from rebalance)
+        // Should log removal
         assert!(audit.count() > 0);
-        
-        // Verify at least one ConfigUpdate event for the expired removal
-        let has_config_update = (0..audit.count()).any(|i| {
-            // Would need to iterate through audit records, but we know at least one was logged
-            true
-        });
-        assert!(has_config_update);
     }
 
     #[test]
