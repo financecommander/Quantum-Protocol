@@ -19,11 +19,11 @@ use crate::{FillEvent, RejectionEvent, RejectionReason, Side};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PropAccountStatus {
-    Inactive = 0,      // Account not initialized or disabled
-    Active = 1,        // Actively syncing with master
-    RateLimited = 2,   // Rejected recent fill; in backoff
-    OutOfSync = 3,     // Sync lag exceeds threshold (>100µs)
-    Error = 4,         // Critical error (margin call, disconnect)
+    Inactive = 0,    // Account not initialized or disabled
+    Active = 1,      // Actively syncing with master
+    RateLimited = 2, // Rejected recent fill; in backoff
+    OutOfSync = 3,   // Sync lag exceeds threshold (>100µs)
+    Error = 4,       // Critical error (margin call, disconnect)
 }
 
 // ---------------------------------------------------------------------------
@@ -165,20 +165,20 @@ impl PropScalingEngine {
     /// Handle a fill on a prop account
     pub fn handle_prop_fill(&mut self, fill: FillEvent) {
         let account = &mut self.accounts[fill.account_id as usize];
-        
+
         // Update position
         match fill.side {
             Side::Buy => account.position += fill.qty,
             Side::Sell => account.position -= fill.qty,
         }
-        
+
         // Record fill time and latency
         account.last_fill_ts_ns = fill.timestamp_ns;
         if self.master.last_fill_ts_ns > 0 {
             let latency_ns = fill.timestamp_ns.saturating_sub(self.master.last_fill_ts_ns);
             account.fill_latency_us = (latency_ns / 1000) as u16;
         }
-        
+
         // Reset rejection count on successful fill
         if account.status == PropAccountStatus::RateLimited {
             account.rejection_count = 0;
@@ -195,9 +195,9 @@ impl PropScalingEngine {
     /// Handle a rejection from a prop account
     pub fn handle_prop_rejection(&mut self, event: RejectionEvent) {
         let account = &mut self.accounts[event.account_id as usize];
-        
+
         account.rejection_count += 1;
-        
+
         match event.reason {
             RejectionReason::RateLimit => {
                 if account.status == PropAccountStatus::Active {
@@ -225,7 +225,7 @@ impl PropScalingEngine {
     /// Execute auto-hedge for accounts in rate limit backoff
     pub fn auto_hedge(&mut self) -> usize {
         let mut hedged_count = 0;
-        
+
         for i in 0..Self::MAX_PROP_ACCOUNTS {
             if self.hedge_buffer[i] != 0 {
                 // In a real implementation, this would execute on master IBKR
@@ -234,7 +234,7 @@ impl PropScalingEngine {
                 hedged_count += 1;
             }
         }
-        
+
         self.last_hedge_ts_ns = crate::now_ns();
         hedged_count
     }
@@ -245,7 +245,7 @@ impl PropScalingEngine {
         if self.sync_lag_ns > Self::SYNC_THRESHOLD_NS {
             return false;
         }
-        
+
         // Check for accounts in bad states
         for account in self.accounts.iter() {
             if account.status == PropAccountStatus::OutOfSync
@@ -254,12 +254,12 @@ impl PropScalingEngine {
                 return false;
             }
         }
-        
+
         // Max 5 accounts can be rate limited
         if self.rate_limited_count > 5 {
             return false;
         }
-        
+
         true
     }
 
@@ -267,7 +267,7 @@ impl PropScalingEngine {
     pub fn position_drift(&self, account_id: u8) -> f64 {
         let account = &self.accounts[account_id as usize];
         let drift = (account.position - account.target_position).abs();
-        
+
         if account.target_position != 0 {
             (drift as f64 / account.target_position.abs() as f64) * 100.0
         } else {
@@ -282,7 +282,7 @@ impl PropScalingEngine {
             account.target_position = 0;
             account.rejection_count = 0;
             account.sync_lag_ns = 0;
-            
+
             // Reactivate accounts with sufficient equity
             if account.equity >= Self::MIN_EQUITY {
                 account.status = PropAccountStatus::Active;
@@ -290,15 +290,17 @@ impl PropScalingEngine {
                 account.status = PropAccountStatus::Inactive;
             }
         }
-        
+
         self.master.position = 0;
         self.master.target_position = 0;
         self.sync_lag_ns = 0;
         self.rate_limited_count = 0;
         self.hedge_buffer = [0; 32];
-        
+
         // Recount active accounts
-        self.num_active_accounts = self.accounts.iter()
+        self.num_active_accounts = self
+            .accounts
+            .iter()
             .filter(|a| a.status == PropAccountStatus::Active)
             .count() as u8;
     }
@@ -323,7 +325,7 @@ impl PropScalingEngine {
     pub fn set_target_position(&mut self, account_id: u8, target: i32) {
         if (account_id as usize) < Self::MAX_PROP_ACCOUNTS {
             let account = &mut self.accounts[account_id as usize];
-            
+
             // Validate margin availability (simplified check)
             let position_delta = (target - account.position).abs();
             if account.margin_available > (position_delta as f64 * 50.0) {
@@ -335,21 +337,24 @@ impl PropScalingEngine {
     /// Internal: Update max sync lag across all accounts
     fn update_sync_lag(&mut self) {
         let mut max_lag = 0u32;
-        
+
         for account in self.accounts.iter_mut() {
             if account.status == PropAccountStatus::Active
                 || account.status == PropAccountStatus::RateLimited
             {
                 // Calculate lag from master
                 if self.master.last_fill_ts_ns > 0 && account.last_fill_ts_ns > 0 {
-                    let lag = self.master.last_fill_ts_ns
-                        .saturating_sub(account.last_fill_ts_ns) as u32;
+                    let lag = self
+                        .master
+                        .last_fill_ts_ns
+                        .saturating_sub(account.last_fill_ts_ns)
+                        as u32;
                     account.sync_lag_ns = lag;
                     max_lag = max_lag.max(lag);
                 }
             }
         }
-        
+
         self.sync_lag_ns = max_lag;
     }
 }
@@ -372,7 +377,7 @@ mod tests {
     fn test_init_accounts() {
         let mut engine = PropScalingEngine::new();
         engine.init_accounts();
-        
+
         assert_eq!(engine.num_active_accounts, 0);
         for (i, account) in engine.accounts.iter().enumerate() {
             assert_eq!(account.id, i as u8);
@@ -384,14 +389,14 @@ mod tests {
     fn test_handle_master_fill_buy() {
         let mut engine = PropScalingEngine::new();
         engine.init_accounts();
-        
+
         // Activate some accounts
         for i in 0..5 {
             engine.accounts[i].status = PropAccountStatus::Active;
             engine.accounts[i].equity = 5000.0;
         }
         engine.num_active_accounts = 5;
-        
+
         let fill = FillEvent {
             timestamp_ns: 1000,
             account_id: 0,
@@ -400,9 +405,9 @@ mod tests {
             price: 50.0,
             is_master: true,
         };
-        
+
         engine.handle_master_fill(fill);
-        
+
         assert_eq!(engine.master.position, 100);
         // All active accounts should have target updated
         for i in 0..5 {
@@ -415,7 +420,7 @@ mod tests {
         let mut engine = PropScalingEngine::new();
         engine.accounts[0].status = PropAccountStatus::Active;
         engine.master.last_fill_ts_ns = 1000;
-        
+
         let fill = FillEvent {
             timestamp_ns: 1500,
             account_id: 0,
@@ -424,9 +429,9 @@ mod tests {
             price: 50.0,
             is_master: false,
         };
-        
+
         engine.handle_prop_fill(fill);
-        
+
         assert_eq!(engine.accounts[0].position, 50);
         assert_eq!(engine.accounts[0].last_fill_ts_ns, 1500);
         // Latency should be 500ns = 0.5µs (rounds to 0)
@@ -437,16 +442,16 @@ mod tests {
     fn test_handle_prop_rejection_rate_limit() {
         let mut engine = PropScalingEngine::new();
         engine.accounts[0].status = PropAccountStatus::Active;
-        
+
         let rejection = RejectionEvent {
             timestamp_ns: 1000,
             account_id: 0,
             reason: RejectionReason::RateLimit,
             original_qty: 100,
         };
-        
+
         engine.handle_prop_rejection(rejection);
-        
+
         assert_eq!(engine.accounts[0].status, PropAccountStatus::RateLimited);
         assert_eq!(engine.rate_limited_count, 1);
         assert_eq!(engine.hedge_buffer[0], 100);
@@ -457,9 +462,9 @@ mod tests {
         let mut engine = PropScalingEngine::new();
         engine.hedge_buffer[0] = 100;
         engine.hedge_buffer[1] = 50;
-        
+
         let hedged = engine.auto_hedge();
-        
+
         assert_eq!(hedged, 2);
         assert_eq!(engine.hedge_buffer[0], 0);
         assert_eq!(engine.hedge_buffer[1], 0);
@@ -471,9 +476,9 @@ mod tests {
         let mut engine = PropScalingEngine::new();
         engine.accounts[0].status = PropAccountStatus::Active;
         engine.sync_lag_ns = 50_000; // 50µs - under threshold
-        
+
         assert!(engine.is_sync_healthy());
-        
+
         // Exceed threshold
         engine.sync_lag_ns = 150_000; // 150µs
         assert!(!engine.is_sync_healthy());
@@ -483,7 +488,7 @@ mod tests {
     fn test_is_sync_healthy_with_out_of_sync_account() {
         let mut engine = PropScalingEngine::new();
         engine.accounts[0].status = PropAccountStatus::OutOfSync;
-        
+
         assert!(!engine.is_sync_healthy());
     }
 
@@ -492,7 +497,7 @@ mod tests {
         let mut engine = PropScalingEngine::new();
         engine.accounts[0].position = 90;
         engine.accounts[0].target_position = 100;
-        
+
         let drift = engine.position_drift(0);
         assert!((drift - 10.0).abs() < 0.1);
     }
@@ -500,15 +505,15 @@ mod tests {
     #[test]
     fn test_reset_daily() {
         let mut engine = PropScalingEngine::new();
-        
+
         // Set up some state
         engine.accounts[0].equity = 5000.0;
         engine.accounts[0].position = 100;
         engine.accounts[0].rejection_count = 3;
         engine.master.position = 500;
-        
+
         engine.reset_daily();
-        
+
         assert_eq!(engine.accounts[0].position, 0);
         assert_eq!(engine.accounts[0].target_position, 0);
         assert_eq!(engine.accounts[0].rejection_count, 0);
@@ -521,9 +526,9 @@ mod tests {
     fn test_reset_daily_insufficient_equity() {
         let mut engine = PropScalingEngine::new();
         engine.accounts[0].equity = 1000.0; // Below minimum
-        
+
         engine.reset_daily();
-        
+
         assert_eq!(engine.accounts[0].status, PropAccountStatus::Inactive);
         assert_eq!(engine.num_active_accounts, 0);
     }
@@ -534,7 +539,7 @@ mod tests {
         engine.accounts[0].status = PropAccountStatus::Active;
         engine.accounts[1].status = PropAccountStatus::RateLimited;
         engine.accounts[2].status = PropAccountStatus::Inactive;
-        
+
         assert_eq!(engine.active_count(), 2);
     }
 
@@ -542,7 +547,7 @@ mod tests {
     fn test_rate_limited_count() {
         let mut engine = PropScalingEngine::new();
         engine.rate_limited_count = 3;
-        
+
         assert_eq!(engine.rate_limited_count(), 3);
     }
 
@@ -551,9 +556,9 @@ mod tests {
         let mut engine = PropScalingEngine::new();
         engine.accounts[0].margin_available = 10000.0;
         engine.accounts[0].position = 0;
-        
+
         engine.set_target_position(0, 100);
-        
+
         assert_eq!(engine.accounts[0].target_position, 100);
     }
 
@@ -562,9 +567,9 @@ mod tests {
         let mut engine = PropScalingEngine::new();
         engine.accounts[0].margin_available = 100.0; // Insufficient
         engine.accounts[0].position = 0;
-        
+
         engine.set_target_position(0, 1000);
-        
+
         // Should not update target
         assert_eq!(engine.accounts[0].target_position, 0);
     }
@@ -573,7 +578,7 @@ mod tests {
     fn test_consecutive_rejections_trigger_out_of_sync() {
         let mut engine = PropScalingEngine::new();
         engine.accounts[0].status = PropAccountStatus::Active;
-        
+
         // Send multiple rejections
         for _ in 0..4 {
             let rejection = RejectionEvent {
@@ -581,10 +586,10 @@ mod tests {
                 account_id: 0,
                 reason: RejectionReason::OrderTooLarge,
                 original_qty: 100,
-            };
+            }; 
             engine.handle_prop_rejection(rejection);
         }
-        
+
         assert_eq!(engine.accounts[0].status, PropAccountStatus::OutOfSync);
     }
 }
