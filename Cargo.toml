@@ -18,3 +18,16 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "latency_bench"
 harness = false
+
+[[bench]]
+name = "prop_scaling_bench"
+harness = false
+
+[[bench]]
+name = "rwa_crypto_bench"
+harness = false
+
+[[bench]]
+name = "tail_hedging_bench"
+harness = false
+
