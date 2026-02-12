@@ -9,6 +9,7 @@
 pub mod engine;
 pub mod config;
 pub mod feeds;
+pub mod risk;
 
 // Re-export commonly used types
 pub use engine::*;
