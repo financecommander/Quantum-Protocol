@@ -1,0 +1,77 @@
+# Quantum Protocol HFT Engine Configuration
+# ============================================
+# Environment variable substitution: use ${ENV_VAR} syntax
+# Hot reload: changes to this file are automatically applied
+
+[engine]
+udp_addr = "0.0.0.0:9999"
+max_position = 1000000.0
+hedge_ratio = 0.8
+circuit_breaker_enabled = true
+heartbeat_max_lag_us = 100
+
+# ---------------------------------------------------------------------------
+# Trading Sleeves
+# ---------------------------------------------------------------------------
+
+[sleeves.treasury_basis]
+enabled = true
+weight = 0.125
+
+[sleeves.vol_regime]
+enabled = true
+threshold_low = 15.0
+threshold_high = 30.0
+
+[sleeves.prop_scaling]
+enabled = true
+max_accounts = 32
+min_equity = 2000.0
+
+[sleeves.rwa_crypto]
+enabled = true
+min_spread_bps = 5.0
+
+[sleeves.tail_hedging]
+enabled = true
+vix_critical_threshold = 45.0
+
+# ---------------------------------------------------------------------------
+# Risk Management
+# ---------------------------------------------------------------------------
+
+[risk]
+max_position_per_symbol = 100000.0
+max_portfolio_position = 5000000.0
+max_daily_loss = 50000.0
+max_consecutive_rejections = 10
+heartbeat_timeout_ms = 5000
+
+# ---------------------------------------------------------------------------
+# Monitoring
+# ---------------------------------------------------------------------------
+
+[monitoring]
+metrics_port = 9090
+audit_log_dir = "/var/log/quantum"
+audit_retention_days = 2555  # ~7 years (FINRA 3110)
+
+# ---------------------------------------------------------------------------
+# Data Feeds
+# ---------------------------------------------------------------------------
+
+[feeds]
+ws_url = "wss://feed.example.com/v1/market"
+api_key = "${QP_API_KEY}"
+symbols = ["BTC-USD", "ETH-USD", "SPY", "QQQ", "TLT"]
+heartbeat_interval_ms = 1000
+reconnect_max_delay_ms = 60000
+
+# ---------------------------------------------------------------------------
+# Alerts
+# ---------------------------------------------------------------------------
+
+[alerts]
+slack_webhook_url = "${QP_SLACK_WEBHOOK}"
+email_to = "${QP_ALERT_EMAIL}"
+cooldown_secs = 300

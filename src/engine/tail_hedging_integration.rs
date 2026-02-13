@@ -2,8 +2,8 @@
 //!
 //! Integrates the Tail Hedging engine with the main trading loop.
 
-use crate::tail_hedging::{TailHedgingEngine, HedgePosition, HedgeInstrument, TailRiskLevel};
-use crate::{AuditRing, AuditRecord, AuditEventType, MarketPacket, SharedConfig};
+use crate::tail_hedging::{HedgeInstrument, HedgePosition, TailHedgingEngine, TailRiskLevel};
+use crate::{AuditEventType, AuditRecord, AuditRing, MarketPacket, SharedConfig};
 
 /// Update tail hedging engine with market data
 pub fn update_tail_hedging_from_market(
@@ -34,7 +34,7 @@ pub fn process_tail_hedging_rebalance(
 ) {
     // Calculate portfolio value from max_position (simplified)
     let portfolio_value = config.max_position;
-    
+
     // Remove expired hedges
     let expired = engine.remove_expired_hedges();
     if expired > 0 {
@@ -43,14 +43,14 @@ pub fn process_tail_hedging_rebalance(
             event_type: AuditEventType::ConfigUpdate,
             sleeve_id: 5,
             signal_value: expired as f64,
-            position_delta: expired as f64,  // Track number of hedges removed
+            position_delta: expired as f64, // Track number of hedges removed
             risk_flag: 0,
         });
     }
-    
+
     // Rebalance hedges based on risk level
     let actions = engine.rebalance_hedges(portfolio_value);
-    
+
     for action in actions {
         // In production, would execute hedge orders
         // For now, just log to audit
@@ -67,7 +67,7 @@ pub fn process_tail_hedging_rebalance(
                 HedgeInstrument::Treasury => 4,
             },
         });
-        
+
         // Add the hedge position
         engine.add_hedge(action);
     }
@@ -80,7 +80,7 @@ pub fn report_tail_hedging_performance(
     audit: &mut AuditRing,
 ) {
     let stats = engine.get_stats();
-    
+
     audit.push(AuditRecord {
         timestamp_ns: packet.timestamp_ns,
         event_type: AuditEventType::Heartbeat,
@@ -92,13 +92,9 @@ pub fn report_tail_hedging_performance(
 }
 
 /// Check if tail hedging requires crisis protocol activation
-pub fn check_tail_crisis_threshold(
-    engine: &TailHedgingEngine,
-    packet: &MarketPacket,
-) -> bool {
+pub fn check_tail_crisis_threshold(engine: &TailHedgingEngine, packet: &MarketPacket) -> bool {
     // Activate crisis if VIX is critical or we have a significant VIX spike
-    engine.current_risk_level == TailRiskLevel::Critical
-        || packet.vix > 45.0
+    engine.current_risk_level == TailRiskLevel::Critical || packet.vix > 45.0
 }
 
 // ---------------------------------------------------------------------------
@@ -127,9 +123,9 @@ mod tests {
         let mut engine = TailHedgingEngine::new();
         let mut audit = AuditRing::new();
         let packet = make_packet(18.0);
-        
+
         update_tail_hedging_from_market(&mut engine, &packet, &mut audit);
-        
+
         // No event expected for normal VIX
         assert_eq!(audit.count(), 0);
     }
@@ -138,12 +134,12 @@ mod tests {
     fn test_update_tail_hedging_spike() {
         let mut engine = TailHedgingEngine::new();
         let mut audit = AuditRing::new();
-        
+
         engine.last_vix = 15.0;
         let packet = make_packet(50.0); // Large spike
-        
+
         update_tail_hedging_from_market(&mut engine, &packet, &mut audit);
-        
+
         // Should log crisis event
         assert_eq!(audit.count(), 1);
         let rec = audit.last().unwrap();
@@ -157,12 +153,12 @@ mod tests {
         let mut audit = AuditRing::new();
         let config = SharedConfig::default();
         let packet = make_packet(35.0); // High VIX
-        
+
         // Set high risk to trigger rebalance
         engine.current_risk_level = TailRiskLevel::High;
-        
+
         process_tail_hedging_rebalance(&mut engine, &packet, &config, &mut audit);
-        
+
         // Should generate rebalance actions
         assert!(engine.num_positions > 0);
     }
@@ -173,24 +169,24 @@ mod tests {
         let mut audit = AuditRing::new();
         let config = SharedConfig::default();
         let packet = make_packet(20.0);
-        
+
         // Add expired position
         let expired = HedgePosition {
             instrument: HedgeInstrument::SpxPut,
             notional: 100_000.0,
             strike: 4000.0,
-            expiry_days: 0,  // Expired
+            expiry_days: 0, // Expired
             cost_bps: 50.0,
             delta: -0.3,
             vega: 0.5,
         };
         engine.add_hedge(expired);
-        
+
         let initial_count = engine.num_positions;
         assert_eq!(initial_count, 1);
-        
+
         process_tail_hedging_rebalance(&mut engine, &packet, &config, &mut audit);
-        
+
         // Should log removal
         assert!(audit.count() > 0);
     }
@@ -200,7 +196,7 @@ mod tests {
         let mut engine = TailHedgingEngine::new();
         let mut audit = AuditRing::new();
         let packet = make_packet(20.0);
-        
+
         // Add some positions
         let position = HedgePosition {
             instrument: HedgeInstrument::SpxPut,
@@ -212,9 +208,9 @@ mod tests {
             vega: 0.5,
         };
         engine.add_hedge(position);
-        
+
         report_tail_hedging_performance(&engine, &packet, &mut audit);
-        
+
         assert_eq!(audit.count(), 1);
         let rec = audit.last().unwrap();
         assert_eq!(rec.event_type, AuditEventType::Heartbeat);
@@ -225,7 +221,7 @@ mod tests {
     fn test_check_tail_crisis_threshold_normal() {
         let engine = TailHedgingEngine::new();
         let packet = make_packet(20.0);
-        
+
         assert!(!check_tail_crisis_threshold(&engine, &packet));
     }
 
@@ -233,7 +229,7 @@ mod tests {
     fn test_check_tail_crisis_threshold_critical_vix() {
         let engine = TailHedgingEngine::new();
         let packet = make_packet(50.0);
-        
+
         assert!(check_tail_crisis_threshold(&engine, &packet));
     }
 
@@ -242,7 +238,7 @@ mod tests {
         let mut engine = TailHedgingEngine::new();
         engine.current_risk_level = TailRiskLevel::Critical;
         let packet = make_packet(20.0);
-        
+
         assert!(check_tail_crisis_threshold(&engine, &packet));
     }
 
@@ -251,24 +247,24 @@ mod tests {
         let mut engine = TailHedgingEngine::new();
         let mut audit = AuditRing::new();
         let config = SharedConfig::default();
-        
+
         // Start with normal VIX
         let packet1 = make_packet(18.0);
         update_tail_hedging_from_market(&mut engine, &packet1, &mut audit);
         process_tail_hedging_rebalance(&mut engine, &packet1, &config, &mut audit);
-        
+
         // VIX spike to critical level
         let packet2 = make_packet(50.0); // Critical level to trigger crisis
         update_tail_hedging_from_market(&mut engine, &packet2, &mut audit);
         process_tail_hedging_rebalance(&mut engine, &packet2, &config, &mut audit);
-        
+
         // Should have crisis event and hedges
         assert!(audit.count() > 0);
         assert!(engine.num_positions > 0);
-        
+
         // Report performance
         report_tail_hedging_performance(&engine, &packet2, &mut audit);
-        
+
         // Verify crisis threshold
         assert!(check_tail_crisis_threshold(&engine, &packet2));
     }
