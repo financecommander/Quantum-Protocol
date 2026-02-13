@@ -147,9 +147,9 @@ impl PropScalingEngine {
             Side::Sell => self.master.position -= fill.qty,
         }
 
-        // Fan out to active accounts (distribute pro-rata)
+        // Fan out to active accounts — target position mirrors master.
+        // TODO: Use pro-rata qty distribution when per-account sizing is implemented.
         if self.num_active_accounts > 0 {
-            let _qty_per_account = fill.qty / self.num_active_accounts as i32;
             for account in self.accounts.iter_mut() {
                 if account.status == PropAccountStatus::Active {
                     account.target_position = self.master.position;
