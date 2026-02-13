@@ -19,9 +19,9 @@ pub struct ArbitrageOpportunity {
     pub symbol_id: u32,
     pub venue_a_price: f64,
     pub venue_b_price: f64,
-    pub spread_bps: f64,         // Spread in basis points
-    pub profit_potential: f64,    // Estimated profit after fees
-    pub confidence: f64,          // 0.0-1.0 confidence score
+    pub spread_bps: f64,       // Spread in basis points
+    pub profit_potential: f64, // Estimated profit after fees
+    pub confidence: f64,       // 0.0-1.0 confidence score
 }
 
 impl Default for ArbitrageOpportunity {
@@ -71,7 +71,7 @@ impl Default for CryptoPair {
 // ---------------------------------------------------------------------------
 
 pub struct RwaCryptoEngine {
-    pub pairs: [CryptoPair; 16],          // Track up to 16 pairs
+    pub pairs: [CryptoPair; 16],                   // Track up to 16 pairs
     pub opportunities: [ArbitrageOpportunity; 32], // Recent opportunities
     pub num_pairs: usize,
     pub num_opportunities: usize,
@@ -89,8 +89,8 @@ impl Default for RwaCryptoEngine {
 impl RwaCryptoEngine {
     pub const MAX_PAIRS: usize = 16;
     pub const MAX_OPPORTUNITIES: usize = 32;
-    pub const MIN_SPREAD_BPS: f64 = 5.0;  // Minimum 5bp spread to trade
-    pub const FEE_BPS: f64 = 2.0;          // Assume 2bp total fees
+    pub const MIN_SPREAD_BPS: f64 = 5.0; // Minimum 5bp spread to trade
+    pub const FEE_BPS: f64 = 2.0; // Assume 2bp total fees
 
     pub fn new() -> Self {
         Self {
@@ -115,7 +115,7 @@ impl RwaCryptoEngine {
                 break;
             }
         }
-        
+
         if !found && self.num_pairs < Self::MAX_PAIRS {
             self.pairs[self.num_pairs] = pair;
             self.num_pairs += 1;
@@ -126,19 +126,19 @@ impl RwaCryptoEngine {
     pub fn scan_opportunities(&mut self, current_time_ns: u64) -> usize {
         self.last_scan_ns = current_time_ns;
         let mut found_count = 0;
-        
+
         for i in 0..self.num_pairs {
             let pair = &self.pairs[i];
-            
+
             // Check spot vs futures spread
             if pair.spot_price > 0.0 && pair.futures_price > 0.0 {
                 let spread_pct = ((pair.futures_price - pair.spot_price) / pair.spot_price) * 100.0;
                 let spread_bps = spread_pct * 100.0;
-                
+
                 // Only consider if spread exceeds minimum + fees
                 if spread_bps.abs() > Self::MIN_SPREAD_BPS + Self::FEE_BPS {
                     let profit_potential = spread_bps.abs() - Self::FEE_BPS;
-                    
+
                     // Calculate confidence based on volume and recency
                     let age_penalty = if current_time_ns > pair.last_update_ns {
                         let age_ms = (current_time_ns - pair.last_update_ns) / 1_000_000;
@@ -148,7 +148,7 @@ impl RwaCryptoEngine {
                     };
                     let volume_score = (pair.volume_24h / 1_000_000.0).min(1.0);
                     let confidence = (age_penalty + volume_score) / 2.0;
-                    
+
                     if self.num_opportunities < Self::MAX_OPPORTUNITIES {
                         self.opportunities[self.num_opportunities] = ArbitrageOpportunity {
                             timestamp_ns: current_time_ns,
@@ -165,7 +165,7 @@ impl RwaCryptoEngine {
                 }
             }
         }
-        
+
         found_count
     }
 
@@ -174,11 +174,11 @@ impl RwaCryptoEngine {
         if self.num_opportunities == 0 {
             return None;
         }
-        
+
         // Find opportunity with best risk-adjusted profit
         let mut best_idx = 0;
         let mut best_score = 0.0;
-        
+
         for i in 0..self.num_opportunities {
             let opp = &self.opportunities[i];
             let score = opp.profit_potential * opp.confidence;
@@ -187,30 +187,30 @@ impl RwaCryptoEngine {
                 best_idx = i;
             }
         }
-        
+
         let best = self.opportunities[best_idx];
-        
+
         // Execute (in production this would send orders)
         self.total_executions += 1;
         self.total_profit += best.profit_potential;
-        
+
         // Remove executed opportunity
         for i in best_idx..self.num_opportunities - 1 {
             self.opportunities[i] = self.opportunities[i + 1];
         }
         self.num_opportunities -= 1;
-        
+
         Some(best)
     }
 
     /// Clear stale opportunities older than threshold
     pub fn clear_stale_opportunities(&mut self, current_time_ns: u64, max_age_ns: u64) {
         let mut write_idx = 0;
-        
+
         for read_idx in 0..self.num_opportunities {
             let opp = &self.opportunities[read_idx];
             let age = current_time_ns.saturating_sub(opp.timestamp_ns);
-            
+
             if age < max_age_ns {
                 if write_idx != read_idx {
                     self.opportunities[write_idx] = *opp;
@@ -218,7 +218,7 @@ impl RwaCryptoEngine {
                 write_idx += 1;
             }
         }
-        
+
         self.num_opportunities = write_idx;
     }
 
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn test_update_pair() {
         let mut engine = RwaCryptoEngine::new();
-        
+
         let pair = CryptoPair {
             symbol_id: 1,
             spot_price: 50000.0,
@@ -274,9 +274,9 @@ mod tests {
             volume_24h: 1_000_000.0,
             last_update_ns: 1000,
         };
-        
+
         engine.update_pair(pair);
-        
+
         assert_eq!(engine.num_pairs, 1);
         assert_eq!(engine.pairs[0].symbol_id, 1);
         assert_eq!(engine.pairs[0].spot_price, 50000.0);
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn test_update_pair_duplicate() {
         let mut engine = RwaCryptoEngine::new();
-        
+
         let pair1 = CryptoPair {
             symbol_id: 1,
             spot_price: 50000.0,
@@ -294,9 +294,9 @@ mod tests {
             volume_24h: 1_000_000.0,
             last_update_ns: 1000,
         };
-        
+
         engine.update_pair(pair1);
-        
+
         let pair2 = CryptoPair {
             symbol_id: 1,
             spot_price: 50050.0,
@@ -305,9 +305,9 @@ mod tests {
             volume_24h: 1_100_000.0,
             last_update_ns: 2000,
         };
-        
+
         engine.update_pair(pair2);
-        
+
         // Should update, not add
         assert_eq!(engine.num_pairs, 1);
         assert_eq!(engine.pairs[0].spot_price, 50050.0);
@@ -316,7 +316,7 @@ mod tests {
     #[test]
     fn test_scan_opportunities_with_spread() {
         let mut engine = RwaCryptoEngine::new();
-        
+
         // Add pair with 10bp spread (above minimum)
         let pair = CryptoPair {
             symbol_id: 1,
@@ -326,11 +326,11 @@ mod tests {
             volume_24h: 1_000_000.0,
             last_update_ns: 1000,
         };
-        
+
         engine.update_pair(pair);
-        
+
         let found = engine.scan_opportunities(1000);
-        
+
         assert_eq!(found, 1);
         assert_eq!(engine.num_opportunities, 1);
         assert!(engine.opportunities[0].spread_bps > 5.0);
@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn test_scan_opportunities_below_threshold() {
         let mut engine = RwaCryptoEngine::new();
-        
+
         // Add pair with 3bp spread (below minimum + fees)
         let pair = CryptoPair {
             symbol_id: 1,
@@ -349,11 +349,11 @@ mod tests {
             volume_24h: 1_000_000.0,
             last_update_ns: 1000,
         };
-        
+
         engine.update_pair(pair);
-        
+
         let found = engine.scan_opportunities(1000);
-        
+
         assert_eq!(found, 0);
         assert_eq!(engine.num_opportunities, 0);
     }
@@ -361,7 +361,7 @@ mod tests {
     #[test]
     fn test_execute_best_opportunity() {
         let mut engine = RwaCryptoEngine::new();
-        
+
         // Add two opportunities
         engine.opportunities[0] = ArbitrageOpportunity {
             timestamp_ns: 1000,
@@ -372,7 +372,7 @@ mod tests {
             profit_potential: 18.0,
             confidence: 0.9,
         };
-        
+
         engine.opportunities[1] = ArbitrageOpportunity {
             timestamp_ns: 1000,
             symbol_id: 2,
@@ -382,11 +382,11 @@ mod tests {
             profit_potential: 31.0,
             confidence: 0.7,
         };
-        
+
         engine.num_opportunities = 2;
-        
+
         let result = engine.execute_best_opportunity();
-        
+
         assert!(result.is_some());
         let opp = result.unwrap();
         // Second opportunity has better risk-adjusted score (31 * 0.7 = 21.7 > 18 * 0.9 = 16.2)
@@ -398,7 +398,7 @@ mod tests {
     #[test]
     fn test_clear_stale_opportunities() {
         let mut engine = RwaCryptoEngine::new();
-        
+
         // Add fresh and stale opportunities
         engine.opportunities[0] = ArbitrageOpportunity {
             timestamp_ns: 1000,
@@ -409,7 +409,7 @@ mod tests {
             profit_potential: 18.0,
             confidence: 0.9,
         };
-        
+
         engine.opportunities[1] = ArbitrageOpportunity {
             timestamp_ns: 10_000_000, // 10ms old
             symbol_id: 2,
@@ -419,12 +419,12 @@ mod tests {
             profit_potential: 31.0,
             confidence: 0.7,
         };
-        
+
         engine.num_opportunities = 2;
-        
+
         // Clear opportunities older than 5ms
         engine.clear_stale_opportunities(10_000_000, 5_000_000);
-        
+
         // Only the fresh one should remain
         assert_eq!(engine.num_opportunities, 1);
         assert_eq!(engine.opportunities[0].symbol_id, 2);
@@ -437,9 +437,9 @@ mod tests {
         engine.num_opportunities = 3;
         engine.total_executions = 10;
         engine.total_profit = 100.0;
-        
+
         let stats = engine.get_stats();
-        
+
         assert_eq!(stats.active_pairs, 5);
         assert_eq!(stats.pending_opportunities, 3);
         assert_eq!(stats.total_executions, 10);
@@ -453,9 +453,9 @@ mod tests {
         engine.total_executions = 10;
         engine.total_profit = 100.0;
         engine.num_opportunities = 5;
-        
+
         engine.reset_daily();
-        
+
         assert_eq!(engine.total_executions, 0);
         assert_eq!(engine.total_profit, 0.0);
         assert_eq!(engine.num_opportunities, 0);

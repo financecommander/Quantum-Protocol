@@ -5,6 +5,7 @@
 pub mod common;
 pub use common::*;
 
+pub mod coordinator;
 pub mod prop_scaling;
 pub mod prop_scaling_integration;
 pub mod rwa_crypto_hft;

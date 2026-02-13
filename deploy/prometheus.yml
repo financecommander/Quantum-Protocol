@@ -1,0 +1,11 @@
+# Prometheus configuration for Quantum Protocol
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "quantum-engine"
+    static_configs:
+      - targets: ["engine:9090"]
+    metrics_path: /metrics
+    scrape_interval: 5s

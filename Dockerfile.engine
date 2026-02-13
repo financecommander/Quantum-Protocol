@@ -1,21 +1,33 @@
 # Quantum Protocol Engine - Layer 1 (Rust)
+# Multi-stage build with health checks and non-root user
 FROM rust:1.77-slim as builder
 
 WORKDIR /app
 COPY Cargo.toml Cargo.lock* ./
-COPY src/engine/ src/engine/
+COPY src/ src/
 COPY benches/ benches/
 
 RUN cargo build --release
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -r quantum && useradd -r -g quantum -d /app quantum
+RUN mkdir -p /var/log/quantum && chown quantum:quantum /var/log/quantum
 
 COPY --from=builder /app/target/release/quantum-engine /usr/local/bin/quantum-engine
+COPY config/ /app/config/
+
+USER quantum
+WORKDIR /app
 
 ENV QP_UDP_ADDR=0.0.0.0:9999
 ENV RUST_LOG=info
 
 EXPOSE 9999/udp
+EXPOSE 9090
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:9090/metrics || exit 1
 
 CMD ["quantum-engine"]

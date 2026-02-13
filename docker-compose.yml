@@ -1,0 +1,56 @@
+# Quantum Protocol Production Stack
+# Engine + Prometheus + Grafana
+
+services:
+  engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.engine
+    ports:
+      - "9999:9999/udp"
+      - "9090:9090"
+    environment:
+      - QP_UDP_ADDR=0.0.0.0:9999
+      - RUST_LOG=info
+      - QP_API_KEY=${QP_API_KEY:-}
+      - QP_SLACK_WEBHOOK=${QP_SLACK_WEBHOOK:-}
+      - QP_ALERT_EMAIL=${QP_ALERT_EMAIL:-}
+    volumes:
+      - ./config:/app/config:ro
+      - audit-logs:/var/log/quantum
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      engine:
+        condition: service_healthy
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  audit-logs:
+  prometheus-data:
+  grafana-data:
