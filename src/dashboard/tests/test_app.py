@@ -191,3 +191,38 @@ class TestUpdateConfig:
     def test_update_config_validation(self, client):
         resp = client.post("/update_config", json={"hedge_ratio": 5.0})
         assert resp.status_code == 422  # validation error: max 2.0
+
+    def test_update_config_inverted_thresholds_rejected(self, client):
+        """vol_regime_threshold_low must not exceed vol_regime_threshold_high."""
+        resp = client.post(
+            "/update_config",
+            json={
+                "vol_regime_threshold_low": 35.0,
+                "vol_regime_threshold_high": 10.0,
+            },
+        )
+        assert resp.status_code == 400
+        assert "threshold" in resp.json()["detail"].lower()
+
+    def test_update_config_inverted_threshold_against_existing(self, client):
+        """Setting low above existing high should be rejected."""
+        resp = client.post(
+            "/update_config",
+            json={"vol_regime_threshold_low": 50.0},
+        )
+        assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Compliance (dynamic FINRA assessment)
+# ---------------------------------------------------------------------------
+
+
+class TestComplianceDynamic:
+    def test_compliance_non_compliant_when_latency_exceeds_threshold(self, client):
+        """Engine p99 latency exceeding heartbeat max lag should mark non-compliant."""
+        _engine_metrics["p99_latency_us"] = 200.0
+        _engine_metrics["ticks_processed"] = 100
+        resp = client.get("/compliance")
+        data = resp.json()
+        assert data["finra_3110_compliant"] is False

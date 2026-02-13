@@ -308,6 +308,44 @@ fn test_parse_udp_packet_too_short() {
     assert!(Engine::parse_udp_packet(&buf).is_none());
 }
 
+#[test]
+fn test_parse_udp_packet_nan_rejected() {
+    let mut pkt = make_packet(20.0, 0.0, 100.0, 100.5, 100.25);
+    pkt.vix = f64::NAN;
+    let bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(
+            &pkt as *const MarketPacket as *const u8,
+            std::mem::size_of::<MarketPacket>(),
+        )
+    };
+    assert!(Engine::parse_udp_packet(bytes).is_none());
+}
+
+#[test]
+fn test_parse_udp_packet_infinity_rejected() {
+    let mut pkt = make_packet(20.0, 0.0, 100.0, 100.5, 100.25);
+    pkt.bid = f64::INFINITY;
+    let bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(
+            &pkt as *const MarketPacket as *const u8,
+            std::mem::size_of::<MarketPacket>(),
+        )
+    };
+    assert!(Engine::parse_udp_packet(bytes).is_none());
+}
+
+#[test]
+fn test_parse_udp_packet_negative_price_rejected() {
+    let mut pkt = make_packet(20.0, 0.0, -100.0, 100.5, 100.25);
+    let bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(
+            &pkt as *const MarketPacket as *const u8,
+            std::mem::size_of::<MarketPacket>(),
+        )
+    };
+    assert!(Engine::parse_udp_packet(bytes).is_none());
+}
+
 // ---------------------------------------------------------------------------
 // SharedConfig Tests
 // ---------------------------------------------------------------------------

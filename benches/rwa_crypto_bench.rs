@@ -100,17 +100,17 @@ impl RwaCryptoEngine {
 
     fn scan_opportunities(&mut self, current_time_ns: u64) -> usize {
         let mut found_count = 0;
-        
+
         for i in 0..self.num_pairs {
             let pair = &self.pairs[i];
-            
+
             if pair.spot_price > 0.0 && pair.futures_price > 0.0 {
                 let spread_pct = ((pair.futures_price - pair.spot_price) / pair.spot_price) * 100.0;
                 let spread_bps = spread_pct * 100.0;
-                
+
                 if spread_bps.abs() > Self::MIN_SPREAD_BPS + Self::FEE_BPS {
                     let profit_potential = spread_bps.abs() - Self::FEE_BPS;
-                    
+
                     let age_penalty = if current_time_ns > pair.last_update_ns {
                         let age_ms = (current_time_ns - pair.last_update_ns) / 1_000_000;
                         (1.0 - (age_ms as f64 / 1000.0)).max(0.0)
@@ -119,7 +119,7 @@ impl RwaCryptoEngine {
                     };
                     let volume_score = (pair.volume_24h / 1_000_000.0).min(1.0);
                     let confidence = (age_penalty + volume_score) / 2.0;
-                    
+
                     if self.num_opportunities < 32 {
                         self.opportunities[self.num_opportunities] = ArbitrageOpportunity {
                             timestamp_ns: current_time_ns,
@@ -136,7 +136,7 @@ impl RwaCryptoEngine {
                 }
             }
         }
-        
+
         found_count
     }
 
@@ -144,10 +144,10 @@ impl RwaCryptoEngine {
         if self.num_opportunities == 0 {
             return None;
         }
-        
+
         let mut best_idx = 0;
         let mut best_score = 0.0;
-        
+
         for i in 0..self.num_opportunities {
             let opp = &self.opportunities[i];
             let score = opp.profit_potential * opp.confidence;
@@ -156,17 +156,17 @@ impl RwaCryptoEngine {
                 best_idx = i;
             }
         }
-        
+
         let best = self.opportunities[best_idx];
         self.total_executions += 1;
         self.total_profit += best.profit_potential;
-        
+
         // Remove executed
         for i in best_idx..self.num_opportunities - 1 {
             self.opportunities[i] = self.opportunities[i + 1];
         }
         self.num_opportunities -= 1;
-        
+
         Some(best)
     }
 }
@@ -198,7 +198,7 @@ fn bench_update_pair(c: &mut Criterion) {
 
 fn bench_scan_opportunities(c: &mut Criterion) {
     let mut engine = RwaCryptoEngine::new();
-    
+
     // Add pairs with varying spreads
     for i in 0..16 {
         let pair = CryptoPair {
@@ -227,7 +227,7 @@ fn bench_execute_opportunity(c: &mut Criterion) {
     c.bench_function("rwa_crypto_execute_opportunity", |b| {
         b.iter(|| {
             let mut engine = RwaCryptoEngine::new();
-            
+
             // Add opportunity
             engine.opportunities[0] = ArbitrageOpportunity {
                 timestamp_ns: 1000,
@@ -239,7 +239,7 @@ fn bench_execute_opportunity(c: &mut Criterion) {
                 confidence: 0.9,
             };
             engine.num_opportunities = 1;
-            
+
             let result = engine.execute_best_opportunity();
             black_box(result);
         });
@@ -251,7 +251,7 @@ fn bench_full_cycle(c: &mut Criterion) {
         let mut ts = 1000u64;
         b.iter(|| {
             let mut engine = RwaCryptoEngine::new();
-            
+
             // Update multiple pairs
             for i in 0..10 {
                 ts += 100;
@@ -265,16 +265,16 @@ fn bench_full_cycle(c: &mut Criterion) {
                 };
                 engine.update_pair(pair);
             }
-            
+
             // Scan for opportunities
             ts += 100;
             let found = engine.scan_opportunities(ts);
-            
+
             // Execute if found
             if found > 0 {
                 engine.execute_best_opportunity();
             }
-            
+
             black_box(&engine);
         });
     });

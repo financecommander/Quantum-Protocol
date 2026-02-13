@@ -2,8 +2,10 @@
 //!
 //! Integrates the RWA/Crypto HFT engine with the main trading loop.
 
-use crate::rwa_crypto_hft::{RwaCryptoEngine, CryptoPair, ArbitrageOpportunity};
-use crate::{AuditRing, AuditRecord, AuditEventType, MarketPacket, SharedConfig};
+#[cfg(test)]
+use crate::rwa_crypto_hft::ArbitrageOpportunity;
+use crate::rwa_crypto_hft::{CryptoPair, RwaCryptoEngine};
+use crate::{AuditEventType, AuditRecord, AuditRing, MarketPacket, SharedConfig};
 
 /// Update RWA/Crypto engine with market data
 pub fn update_rwa_crypto_from_market(
@@ -21,12 +23,12 @@ pub fn update_rwa_crypto_from_market(
         volume_24h: packet.volume as f64,
         last_update_ns: packet.timestamp_ns,
     };
-    
+
     engine.update_pair(pair);
-    
+
     // Scan for opportunities
     let found = engine.scan_opportunities(packet.timestamp_ns);
-    
+
     if found > 0 {
         audit.push(AuditRecord {
             timestamp_ns: packet.timestamp_ns,
@@ -50,10 +52,10 @@ pub fn process_rwa_crypto_opportunities(
     if !config.circuit_breaker_enabled {
         return;
     }
-    
+
     // Clear stale opportunities (older than 1ms)
     engine.clear_stale_opportunities(packet.timestamp_ns, 1_000_000);
-    
+
     // Execute best opportunity if available
     if let Some(opp) = engine.execute_best_opportunity() {
         audit.push(AuditRecord {
@@ -74,7 +76,7 @@ pub fn report_rwa_crypto_performance(
     audit: &mut AuditRing,
 ) {
     let stats = engine.get_stats();
-    
+
     if stats.total_executions > 0 {
         audit.push(AuditRecord {
             timestamp_ns: packet.timestamp_ns,
@@ -82,7 +84,11 @@ pub fn report_rwa_crypto_performance(
             sleeve_id: 4,
             signal_value: stats.total_executions as f64,
             position_delta: stats.total_profit,
-            risk_flag: if stats.avg_profit_per_trade > 0.0 { 0 } else { 1 },
+            risk_flag: if stats.avg_profit_per_trade > 0.0 {
+                0
+            } else {
+                1
+            },
         });
     }
 }
@@ -113,9 +119,9 @@ mod tests {
         let mut engine = RwaCryptoEngine::new();
         let mut audit = AuditRing::new();
         let packet = make_packet(1, 50000.0, 50100.0, 1_000_000);
-        
+
         update_rwa_crypto_from_market(&mut engine, &packet, &mut audit);
-        
+
         assert_eq!(engine.num_pairs, 1);
         assert_eq!(engine.pairs[0].symbol_id, 1);
     }
@@ -124,12 +130,12 @@ mod tests {
     fn test_update_with_arbitrage_opportunity() {
         let mut engine = RwaCryptoEngine::new();
         let mut audit = AuditRing::new();
-        
+
         // Large spread should trigger opportunity
         let packet = make_packet(1, 50000.0, 50500.0, 1_000_000);
-        
+
         update_rwa_crypto_from_market(&mut engine, &packet, &mut audit);
-        
+
         // Should find opportunities
         assert!(engine.num_opportunities > 0);
         // Should log to audit
@@ -142,7 +148,7 @@ mod tests {
         let mut audit = AuditRing::new();
         let config = SharedConfig::default();
         let packet = make_packet(1, 50000.0, 50500.0, 1_000_000);
-        
+
         // Add an opportunity manually
         engine.opportunities[0] = ArbitrageOpportunity {
             timestamp_ns: packet.timestamp_ns,
@@ -154,9 +160,9 @@ mod tests {
             confidence: 0.9,
         };
         engine.num_opportunities = 1;
-        
+
         process_rwa_crypto_opportunities(&mut engine, &packet, &config, &mut audit);
-        
+
         // Should execute the opportunity
         assert_eq!(engine.total_executions, 1);
         assert_eq!(audit.count(), 1);
@@ -169,7 +175,7 @@ mod tests {
         let mut config = SharedConfig::default();
         config.circuit_breaker_enabled = false;
         let packet = make_packet(1, 50000.0, 50500.0, 1_000_000);
-        
+
         // Add an opportunity
         engine.opportunities[0] = ArbitrageOpportunity {
             timestamp_ns: packet.timestamp_ns,
@@ -181,9 +187,9 @@ mod tests {
             confidence: 0.9,
         };
         engine.num_opportunities = 1;
-        
+
         process_rwa_crypto_opportunities(&mut engine, &packet, &config, &mut audit);
-        
+
         // Should NOT execute due to circuit breaker
         assert_eq!(engine.total_executions, 0);
         assert_eq!(audit.count(), 0);
@@ -194,13 +200,13 @@ mod tests {
         let mut engine = RwaCryptoEngine::new();
         let mut audit = AuditRing::new();
         let packet = make_packet(1, 50000.0, 50100.0, 1_000_000);
-        
+
         // Simulate some executions
         engine.total_executions = 10;
         engine.total_profit = 150.0;
-        
+
         report_rwa_crypto_performance(&engine, &packet, &mut audit);
-        
+
         assert_eq!(audit.count(), 1);
         let rec = audit.last().unwrap();
         assert_eq!(rec.event_type, AuditEventType::Heartbeat);
@@ -212,7 +218,7 @@ mod tests {
         let mut engine = RwaCryptoEngine::new();
         let mut audit = AuditRing::new();
         let config = SharedConfig::default();
-        
+
         // Simulate multiple market updates
         for i in 0..5 {
             let packet = make_packet(
@@ -221,21 +227,21 @@ mod tests {
                 50400.0 + (i as f64 * 100.0),
                 1_000_000,
             );
-            
+
             update_rwa_crypto_from_market(&mut engine, &packet, &mut audit);
             process_rwa_crypto_opportunities(&mut engine, &packet, &config, &mut audit);
         }
-        
+
         // Should have multiple pairs
         assert_eq!(engine.num_pairs, 5);
-        
+
         // Should have executed some trades
         assert!(engine.total_executions > 0);
-        
+
         // Report performance
         let packet = make_packet(1, 50000.0, 50100.0, 1_000_000);
         report_rwa_crypto_performance(&engine, &packet, &mut audit);
-        
+
         // Should have audit records
         assert!(audit.count() > 0);
     }

@@ -138,8 +138,14 @@ impl PropScalingEngine {
     fn update_sync_lag(&mut self) {
         let mut max_lag = 0u32;
         for account in self.accounts.iter_mut() {
-            if account.status == PropAccountStatus::Active && self.master.last_fill_ts_ns > 0 && account.last_fill_ts_ns > 0 {
-                let lag = self.master.last_fill_ts_ns.saturating_sub(account.last_fill_ts_ns) as u32;
+            if account.status == PropAccountStatus::Active
+                && self.master.last_fill_ts_ns > 0
+                && account.last_fill_ts_ns > 0
+            {
+                let lag = self
+                    .master
+                    .last_fill_ts_ns
+                    .saturating_sub(account.last_fill_ts_ns) as u32;
                 account.sync_lag_ns = lag;
                 max_lag = max_lag.max(lag);
             }

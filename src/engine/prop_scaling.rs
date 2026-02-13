@@ -9,7 +9,6 @@
 //! - Sync lag monitoring (<100µs threshold)
 //! - Daily reset with margin validation
 
-use super::{AuditEventType, AuditRecord};
 use crate::{FillEvent, RejectionEvent, RejectionReason, Side};
 
 // ---------------------------------------------------------------------------
@@ -71,10 +70,10 @@ impl Default for PropAccount {
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct MasterAccount {
-    pub position: i32,             // Current IBKR position
-    pub target_position: i32,      // Desired position
-    pub last_fill_ts_ns: u64,      // Master fill timestamp
-    pub total_equity: f64,         // Aggregate equity
+    pub position: i32,        // Current IBKR position
+    pub target_position: i32, // Desired position
+    pub last_fill_ts_ns: u64, // Master fill timestamp
+    pub total_equity: f64,    // Aggregate equity
 }
 
 impl Default for MasterAccount {
@@ -96,10 +95,10 @@ pub struct PropScalingEngine {
     pub accounts: [PropAccount; 32],
     pub master: MasterAccount,
     pub num_active_accounts: u8,
-    pub sync_lag_ns: u32,           // Max lag across all accounts
-    pub rate_limited_count: u8,     // Accounts in backoff state
+    pub sync_lag_ns: u32,       // Max lag across all accounts
+    pub rate_limited_count: u8, // Accounts in backoff state
     pub last_hedge_ts_ns: u64,
-    pub hedge_buffer: [i32; 32],   // Auto-hedge order queue (pre-allocated)
+    pub hedge_buffer: [i32; 32], // Auto-hedge order queue (pre-allocated)
 }
 
 impl Default for PropScalingEngine {
@@ -148,9 +147,9 @@ impl PropScalingEngine {
             Side::Sell => self.master.position -= fill.qty,
         }
 
-        // Fan out to active accounts (distribute pro-rata)
+        // Fan out to active accounts — target position mirrors master.
+        // TODO: Use pro-rata qty distribution when per-account sizing is implemented.
         if self.num_active_accounts > 0 {
-            let qty_per_account = fill.qty / self.num_active_accounts as i32;
             for account in self.accounts.iter_mut() {
                 if account.status == PropAccountStatus::Active {
                     account.target_position = self.master.position;
@@ -175,7 +174,9 @@ impl PropScalingEngine {
         // Record fill time and latency
         account.last_fill_ts_ns = fill.timestamp_ns;
         if self.master.last_fill_ts_ns > 0 {
-            let latency_ns = fill.timestamp_ns.saturating_sub(self.master.last_fill_ts_ns);
+            let latency_ns = fill
+                .timestamp_ns
+                .saturating_sub(self.master.last_fill_ts_ns);
             account.fill_latency_us = (latency_ns / 1000) as u16;
         }
 
@@ -310,8 +311,7 @@ impl PropScalingEngine {
         self.accounts
             .iter()
             .filter(|a| {
-                a.status == PropAccountStatus::Active
-                    || a.status == PropAccountStatus::RateLimited
+                a.status == PropAccountStatus::Active || a.status == PropAccountStatus::RateLimited
             })
             .count()
     }
@@ -344,11 +344,10 @@ impl PropScalingEngine {
             {
                 // Calculate lag from master
                 if self.master.last_fill_ts_ns > 0 && account.last_fill_ts_ns > 0 {
-                    let lag = self
-                        .master
-                        .last_fill_ts_ns
-                        .saturating_sub(account.last_fill_ts_ns)
-                        as u32;
+                    let lag =
+                        self.master
+                            .last_fill_ts_ns
+                            .saturating_sub(account.last_fill_ts_ns) as u32;
                     account.sync_lag_ns = lag;
                     max_lag = max_lag.max(lag);
                 }
@@ -586,7 +585,7 @@ mod tests {
                 account_id: 0,
                 reason: RejectionReason::OrderTooLarge,
                 original_qty: 100,
-            }; 
+            };
             engine.handle_prop_rejection(rejection);
         }
 

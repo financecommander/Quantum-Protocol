@@ -187,11 +187,17 @@ async def latency():
 async def compliance():
     """Compliance summary for FINRA 3110 audit."""
     crisis_count = sum(1 for r in _audit_log if r.get("event_type") == "CrisisProtocol")
+    # FINRA 3110 requires active audit logging and heartbeat monitoring.
+    # Assess dynamically: compliant only when audit trail is operational
+    # and heartbeat lag is within configured threshold.
+    has_recent_activity = len(_audit_log) > 0 or _engine_metrics["ticks_processed"] == 0
+    heartbeat_ok = _engine_metrics.get("p99_latency_us", 0.0) <= _shared_config["heartbeat_max_lag_us"]
+    finra_compliant = has_recent_activity and heartbeat_ok
     return ComplianceResponse(
         total_audit_records=len(_audit_log),
         crisis_events=crisis_count,
         last_crisis_state=_engine_metrics["crisis_state"],
-        finra_3110_compliant=True,
+        finra_3110_compliant=finra_compliant,
         worm_storage_active=True,
     )
 
@@ -205,6 +211,15 @@ async def update_config(config: ConfigUpdate):
     updates = config.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No config fields provided")
+
+    # Validate threshold ordering: low must be <= high
+    new_low = updates.get("vol_regime_threshold_low", _shared_config["vol_regime_threshold_low"])
+    new_high = updates.get("vol_regime_threshold_high", _shared_config["vol_regime_threshold_high"])
+    if new_low > new_high:
+        raise HTTPException(
+            status_code=400,
+            detail="vol_regime_threshold_low must be <= vol_regime_threshold_high",
+        )
 
     for key, value in updates.items():
         if key in _shared_config:
