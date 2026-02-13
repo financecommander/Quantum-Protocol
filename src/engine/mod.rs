@@ -221,6 +221,8 @@ impl Engine {
     }
 
     /// Ingest raw UDP bytes into a MarketPacket. Minimal copying.
+    /// Validates that all floating-point fields are finite and non-negative
+    /// where applicable, rejecting malformed or malicious packets.
     pub fn parse_udp_packet(buf: &[u8]) -> Option<MarketPacket> {
         if buf.len() < std::mem::size_of::<MarketPacket>() {
             return None;
@@ -228,6 +230,21 @@ impl Engine {
         // Safety: MarketPacket is repr(C), Copy, and buf length is verified.
         let packet: MarketPacket =
             unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const MarketPacket) };
+
+        // Validate fields: reject NaN, infinity, and out-of-range values
+        if !packet.bid.is_finite()
+            || !packet.ask.is_finite()
+            || !packet.last.is_finite()
+            || !packet.vix.is_finite()
+            || !packet.depeg_pct.is_finite()
+            || packet.bid < 0.0
+            || packet.ask < 0.0
+            || packet.last < 0.0
+            || packet.vix < 0.0
+        {
+            return None;
+        }
+
         Some(packet)
     }
 }

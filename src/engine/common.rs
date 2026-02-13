@@ -6,8 +6,6 @@
 //! - SharedConfig: Runtime configuration
 //! - FillEvent, RejectionEvent: Order execution types
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
 // ---------------------------------------------------------------------------
 // Market Data Structures (zero-copy compatible)
 // ---------------------------------------------------------------------------

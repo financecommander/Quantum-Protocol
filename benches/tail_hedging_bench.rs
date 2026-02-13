@@ -82,13 +82,13 @@ impl TailHedgingEngine {
     fn update_vix(&mut self, vix: f64) -> bool {
         // Update EMA
         self.vix_ema = Self::EMA_ALPHA * vix + (1.0 - Self::EMA_ALPHA) * self.vix_ema;
-        
+
         // Classify risk
         let risk_level = self.classify_risk(vix);
         let changed = risk_level as u8 > self.current_risk_level as u8;
         self.current_risk_level = risk_level;
         self.last_vix = vix;
-        
+
         changed
     }
 
@@ -143,7 +143,7 @@ impl TailHedgingEngine {
     fn remove_expired_hedges(&mut self) -> usize {
         let mut write_idx = 0;
         let mut removed = 0;
-        
+
         for read_idx in 0..self.num_positions {
             let pos = &self.positions[read_idx];
             if pos.expiry_days > 0 {
@@ -155,7 +155,7 @@ impl TailHedgingEngine {
                 removed += 1;
             }
         }
-        
+
         self.num_positions = write_idx;
         removed
     }
@@ -198,7 +198,7 @@ fn bench_add_hedge(c: &mut Criterion) {
     c.bench_function("tail_hedging_add_hedge", |b| {
         b.iter(|| {
             let mut engine = TailHedgingEngine::new();
-            
+
             for i in 0..8 {
                 let position = HedgePosition {
                     instrument: HedgeInstrument::SpxPut,
@@ -211,7 +211,7 @@ fn bench_add_hedge(c: &mut Criterion) {
                 };
                 engine.add_hedge(position);
             }
-            
+
             black_box(&engine);
         });
     });
@@ -219,7 +219,7 @@ fn bench_add_hedge(c: &mut Criterion) {
 
 fn bench_calculate_greeks(c: &mut Criterion) {
     let mut engine = TailHedgingEngine::new();
-    
+
     // Add positions
     for i in 0..8 {
         let position = HedgePosition {
@@ -259,7 +259,7 @@ fn bench_remove_expired(c: &mut Criterion) {
     c.bench_function("tail_hedging_remove_expired", |b| {
         b.iter(|| {
             let mut engine = TailHedgingEngine::new();
-            
+
             // Add mix of active and expired
             for i in 0..8 {
                 let position = HedgePosition {
@@ -273,7 +273,7 @@ fn bench_remove_expired(c: &mut Criterion) {
                 };
                 engine.add_hedge(position);
             }
-            
+
             let removed = engine.remove_expired_hedges();
             black_box(removed);
         });
@@ -285,13 +285,13 @@ fn bench_full_cycle(c: &mut Criterion) {
         let mut vix = 15.0;
         b.iter(|| {
             let mut engine = TailHedgingEngine::new();
-            
+
             // VIX updates
             for _ in 0..10 {
                 vix += 2.0;
                 engine.update_vix(vix);
             }
-            
+
             // Add hedges based on risk
             let notional = engine.recommended_hedge_notional(1_000_000.0);
             if notional > 0.0 {
@@ -306,11 +306,11 @@ fn bench_full_cycle(c: &mut Criterion) {
                 };
                 engine.add_hedge(position);
             }
-            
+
             // Calculate greeks
             let delta = engine.total_delta();
             let vega = engine.total_vega();
-            
+
             black_box((delta, vega));
         });
     });

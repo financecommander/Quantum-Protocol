@@ -3,8 +3,10 @@
 //! Integrates the PropScalingEngine with the main trading engine loop.
 //! Handles market data updates, fill/rejection events, and audit logging.
 
-use crate::prop_scaling::{PropScalingEngine, PropAccountStatus};
-use crate::{AuditRing, AuditRecord, AuditEventType, MarketPacket, SharedConfig, FillEvent, RejectionEvent, Side};
+#[cfg(test)]
+use crate::prop_scaling::PropAccountStatus;
+use crate::prop_scaling::PropScalingEngine;
+use crate::{AuditEventType, AuditRecord, AuditRing, FillEvent, MarketPacket, SharedConfig, Side};
 
 /// Update prop scaling targets based on market conditions
 pub fn update_prop_scaling_targets(
@@ -21,16 +23,16 @@ pub fn update_prop_scaling_targets(
     } else {
         0.75 // Medium vol
     };
-    
+
     // Calculate target position from spread signal
     let spread = packet.ask - packet.bid;
     let target_signal = (spread / packet.last).clamp(-1.0, 1.0);
     let base_position = (target_signal * config.max_position) as i32;
     let adjusted_position = (base_position as f64 * risk_factor) as i32;
-    
+
     // Update master target
     engine.master.target_position = adjusted_position;
-    
+
     // Audit the signal
     audit.push(AuditRecord {
         timestamp_ns: packet.timestamp_ns,
@@ -59,7 +61,7 @@ pub fn process_prop_scaling_state(
             risk_flag: 2, // Degraded sync
         });
     }
-    
+
     // Log hedging operations
     if engine.hedge_buffer.iter().any(|&qty| qty != 0) {
         let total_hedge_qty: i32 = engine.hedge_buffer.iter().sum();
@@ -89,7 +91,7 @@ pub fn simulate_master_fill(
         price,
         is_master: true,
     };
-    
+
     engine.handle_master_fill(fill);
 }
 
@@ -109,7 +111,7 @@ pub fn simulate_prop_fill(
         price,
         is_master: false,
     };
-    
+
     engine.handle_prop_fill(fill);
 }
 
@@ -140,9 +142,9 @@ mod tests {
         let mut audit = AuditRing::new();
         let config = SharedConfig::default();
         let packet = make_packet(10.0, 100.0, 100.5, 100.25);
-        
+
         update_prop_scaling_targets(&mut engine, &packet, &config, &mut audit);
-        
+
         // Low vol should use full risk factor (1.0)
         assert_ne!(engine.master.target_position, 0);
         assert_eq!(audit.count(), 1);
@@ -154,9 +156,9 @@ mod tests {
         let mut audit = AuditRing::new();
         let config = SharedConfig::default();
         let packet = make_packet(35.0, 100.0, 100.5, 100.25);
-        
+
         update_prop_scaling_targets(&mut engine, &packet, &config, &mut audit);
-        
+
         // High vol should reduce position size
         // The actual target depends on spread calculation
         assert_eq!(audit.count(), 1);
@@ -167,12 +169,12 @@ mod tests {
         let mut engine = PropScalingEngine::new();
         let mut audit = AuditRing::new();
         let packet = make_packet(20.0, 100.0, 100.5, 100.25);
-        
+
         // Make sync unhealthy
         engine.sync_lag_ns = 200_000; // 200µs
-        
+
         process_prop_scaling_state(&engine, &packet, &mut audit);
-        
+
         // Should log circuit breaker event
         assert_eq!(audit.count(), 1);
         let rec = audit.last().unwrap();
@@ -185,12 +187,12 @@ mod tests {
         let mut engine = PropScalingEngine::new();
         let mut audit = AuditRing::new();
         let packet = make_packet(20.0, 100.0, 100.5, 100.25);
-        
+
         // Add pending hedge
         engine.hedge_buffer[0] = 100;
-        
+
         process_prop_scaling_state(&engine, &packet, &mut audit);
-        
+
         // Should log hedge event
         assert_eq!(audit.count(), 1);
         let rec = audit.last().unwrap();
@@ -201,9 +203,9 @@ mod tests {
     #[test]
     fn test_simulate_master_fill_buy() {
         let mut engine = PropScalingEngine::new();
-        
+
         simulate_master_fill(&mut engine, 1000, 100, 50.0);
-        
+
         assert_eq!(engine.master.position, 100);
         assert_eq!(engine.master.last_fill_ts_ns, 1000);
     }
@@ -212,9 +214,9 @@ mod tests {
     fn test_simulate_master_fill_sell() {
         let mut engine = PropScalingEngine::new();
         engine.master.position = 100;
-        
+
         simulate_master_fill(&mut engine, 1000, -50, 50.0);
-        
+
         assert_eq!(engine.master.position, 50);
     }
 
@@ -223,9 +225,9 @@ mod tests {
         let mut engine = PropScalingEngine::new();
         engine.accounts[0].status = PropAccountStatus::Active;
         engine.master.last_fill_ts_ns = 1000;
-        
+
         simulate_prop_fill(&mut engine, 0, 1500, 50, 50.0);
-        
+
         assert_eq!(engine.accounts[0].position, 50);
         assert_eq!(engine.accounts[0].last_fill_ts_ns, 1500);
     }
@@ -235,7 +237,7 @@ mod tests {
         let mut engine = PropScalingEngine::new();
         let mut audit = AuditRing::new();
         let config = SharedConfig::default();
-        
+
         // Initialize accounts
         engine.init_accounts();
         for i in 0..5 {
@@ -244,30 +246,30 @@ mod tests {
             engine.accounts[i].margin_available = 10000.0;
         }
         engine.num_active_accounts = 5;
-        
+
         // Receive market data
         let packet = make_packet(18.0, 100.0, 100.5, 100.25);
         update_prop_scaling_targets(&mut engine, &packet, &config, &mut audit);
-        
+
         // Simulate master fill
         simulate_master_fill(&mut engine, 2000, 100, 100.25);
-        
+
         // Simulate prop fills with some latency
         for i in 0..5 {
             simulate_prop_fill(&mut engine, i as u8, 2000 + (i * 100), 20, 100.25);
         }
-        
+
         // Check state
         process_prop_scaling_state(&engine, &packet, &mut audit);
-        
+
         // Verify master position
         assert_eq!(engine.master.position, 100);
-        
+
         // Verify prop positions
         for i in 0..5 {
             assert_eq!(engine.accounts[i].position, 20);
         }
-        
+
         // Audit should have multiple records
         assert!(audit.count() >= 1);
     }

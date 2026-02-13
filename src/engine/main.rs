@@ -35,7 +35,7 @@ fn main() {
         }
     };
 
-    // Set non-blocking for graceful shutdown support
+    // Blocking mode: recv_from will wait until data arrives
     if let Err(e) = socket.set_nonblocking(false) {
         log::warn!("Could not set socket blocking mode: {}", e);
     }

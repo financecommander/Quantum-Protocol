@@ -6,8 +6,6 @@
 //! - Volatility regime monitoring
 //! - Crisis protocol integration
 
-use super::{AuditEventType, AuditRecord};
-
 // ---------------------------------------------------------------------------
 // Hedging Instrument
 // ---------------------------------------------------------------------------
@@ -28,9 +26,9 @@ pub struct HedgePosition {
     pub notional: f64,
     pub strike: f64,
     pub expiry_days: u16,
-    pub cost_bps: f64,  // Cost in basis points
-    pub delta: f64,     // Position delta
-    pub vega: f64,      // Position vega
+    pub cost_bps: f64, // Cost in basis points
+    pub delta: f64,    // Position delta
+    pub vega: f64,     // Position vega
 }
 
 impl Default for HedgePosition {
@@ -89,14 +87,14 @@ impl Default for TailEvent {
 // ---------------------------------------------------------------------------
 
 pub struct TailHedgingEngine {
-    pub positions: [HedgePosition; 8],    // Up to 8 hedge positions
-    pub events: [TailEvent; 32],          // Recent tail events
+    pub positions: [HedgePosition; 8], // Up to 8 hedge positions
+    pub events: [TailEvent; 32],       // Recent tail events
     pub num_positions: usize,
     pub num_events: usize,
     pub current_risk_level: TailRiskLevel,
     pub total_hedge_cost: f64,
     pub total_hedge_pnl: f64,
-    pub vix_ema: f64,  // Exponential moving average of VIX
+    pub vix_ema: f64, // Exponential moving average of VIX
     pub last_vix: f64,
 }
 
