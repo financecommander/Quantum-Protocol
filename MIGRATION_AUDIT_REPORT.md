@@ -28,7 +28,7 @@ This project is a **SEVERE MISMATCH** for the Zero-Code/AI-First architecture. I
 
 #### Critical Business Logic Locations:
 
-**File: `src/engine/main.rs` (Lines 247-289)**
+**File: `src/engine/mod.rs` (Lines 95-137)**
 ```rust
 // Crisis Protocol Evaluation
 pub fn evaluate_crisis(packet: &MarketPacket) -> CrisisState {
@@ -186,8 +186,8 @@ _audit_log = []  # Static in-memory list
 
 **Live Data Sources (Rust Engine):**
 ```rust
-// File: src/engine/main.rs
-// UDP Multicast feed from Arista Switch (Line 11)
+// File: src/engine/main.rs (UDP ingestion)
+// src/engine/common.rs (MarketPacket definition)
 use std::net::UdpSocket;
 
 // Real-time market data via shared memory (zero-copy)
@@ -264,7 +264,7 @@ pub struct MarketPacket {
 
 #### Example of "Copilot-Unfriendly" Code:
 ```rust
-// File: src/engine/main.rs (Lines 93-100)
+// File: src/engine/mod.rs (Lines 37-49)
 pub fn new() -> Self {
     // Heap-allocate the large buffer to avoid stack overflow.
     // This allocation happens once at startup, NOT in the hot path.
@@ -317,20 +317,20 @@ pub fn new() -> Self {
 
 ### Hard-Coded Business Logic (AI Replacement Candidates):
 
-1. **Crisis Protocol Logic** (`src/engine/main.rs:247-255`)
+1. **Crisis Protocol Logic** (`src/engine/mod.rs:95-103`)
    - VIX > 45 → Smart Bunker
    - Depeg > 5% → Surgical Sniper
    - **❌ CANNOT REPLACE:** Latency requirement <100µs, AI takes 50-200ms
 
-2. **Volatility Regime Classification** (`src/engine/main.rs:281-289`)
+2. **Volatility Regime Classification** (`src/engine/mod.rs:129-137`)
    - VIX thresholds for risk-on/risk-off
    - **❌ CANNOT REPLACE:** Deterministic logic required for compliance
 
-3. **Treasury Basis Signal** (`src/engine/main.rs:263-268`)
+3. **Treasury Basis Signal** (`src/engine/mod.rs:111-116`)
    - Spread vs fair value calculation
    - **❌ CANNOT REPLACE:** Real-time calculation in hot path
 
-4. **Config Validation** (`src/dashboard/app.py:207-211`)
+4. **Config Validation** (`src/dashboard/app.py:200-206`)
    - Parameter bounds checking
    - **✅ COULD REPLACE:** Non-critical, can use Pydantic + AI validation
 
@@ -488,9 +488,15 @@ This is a rare case where the audit reveals that the "legacy" codebase is actual
 ## APPENDIX A: FILE INVENTORY
 
 ### Rust Files (Layer 1 - Iron Core):
-- `src/engine/main.rs` (450 lines) - Core HFT engine
-- `src/engine/tests.rs` (192 lines) - Unit tests
-- `benches/latency_bench.rs` (60 lines) - Performance benchmarks
+- `src/engine/mod.rs` (243 lines) - Core engine (ring buffer, crisis protocols, sleeves, tick processing)
+- `src/engine/main.rs` (69 lines) - Binary entry point (UDP ingestion loop)
+- `src/engine/common.rs` (258 lines) - Shared types (MarketPacket, AuditRing, SharedConfig)
+- `src/engine/tests.rs` (358 lines) - Unit tests (26 tests)
+- `src/engine/coordinator.rs` (322 lines) - Async orchestrator with kill switch
+- `src/engine/prop_scaling.rs` (596 lines) - Sleeve 3: Prop scaling
+- `src/engine/rwa_crypto_hft.rs` (464 lines) - Sleeve 4: RWA/Crypto HFT
+- `src/engine/tail_hedging.rs` (544 lines) - Sleeve 5: Tail hedging
+- `benches/latency_bench.rs` - Performance benchmarks
 
 ### Python Files (Layer 2 - Dashboard):
 - `src/dashboard/app.py` (222 lines) - FastAPI REST API
@@ -498,7 +504,7 @@ This is a rare case where the audit reveals that the "legacy" codebase is actual
 - `scripts/quantum_training.py` (98 lines) - QAOA optimizer
 
 ### Configuration:
-- `Cargo.toml` - Rust dependencies (minimal: log, env_logger)
+- `Cargo.toml` - Rust dependencies (log, env_logger, serde, tokio, tokio-tungstenite, notify, regex)
 - `requirements.txt` - Python dependencies (FastAPI, Pydantic, pytest)
 - `Dockerfile.engine` - Rust engine containerization
 - `Dockerfile.platform` - Python dashboard containerization
@@ -507,8 +513,9 @@ This is a rare case where the audit reveals that the "legacy" codebase is actual
 - `README.md` (6818 lines) - Comprehensive project documentation
 - `LICENSE` - Copyright notice
 
-**Total Files:** 9 code files (Rust + Python)  
-**Total Lines:** ~1,500 lines of production code  
+**Total Files:** 20+ code files (Rust + Python)  
+**Total Lines:** ~5,000+ lines of production code  
+**Total Tests:** 196 (all passing)  
 **Complexity:** High (HFT systems programming)  
 **Maintainability:** Requires Rust + HFT expertise
 

@@ -21,15 +21,15 @@ This HFT codebase **can and should** be migrated to a Poly-Agent Architecture (S
 
 | Aspect | Perception | Reality | Impact |
 |--------|-----------|---------|--------|
-| **Latency Requirements** | Sub-100µs | Not achieved (no UDP code) | Can relax to 500ms |
+| **Latency Requirements** | Sub-100µs | UDP code exists but benchmarks measure in-process only | Can relax to 500ms |
 | **Concurrency Complexity** | High (ring buffers, atomics) | Low (single-threaded SPSC) | Easy to simplify |
-| **Trading Logic** | Complex algorithms | 8 FLOPs (3 conditionals) | Trivial to port |
-| **Dependencies** | Kernel bypass, hardware-specific | Pure Rust (log + benchmarks) | No barriers |
+| **Trading Logic** | Complex algorithms | Core: 3 conditionals + arithmetic; 5 sleeves total | Portable to Python |
+| **Dependencies** | Kernel bypass, hardware-specific | Standard ecosystem (tokio, serde, WebSocket) | No barriers |
 
 ### 2. Architecture Analysis
 
 **Current Stack:**
-- **Rust "Iron Core"** (450 lines) — Trading engine targeting <100µs latency
+- **Rust "Iron Core"** (~3,500 lines across 8 modules) — Trading engine with 5 sleeves targeting <100µs latency
 - **FastAPI Dashboard** (222 lines) — Already working, Python-native
 - **QAOA Quantum Training** (98 lines) — Pure Python (Qiskit)
 
@@ -45,7 +45,7 @@ This HFT codebase **can and should** be migrated to a Poly-Agent Architecture (S
 | **Logic Portability** | ✅ Low | Pure functions, no side effects |
 | **Race Conditions** | ✅ None | Single-threaded design |
 | **Dependency Hell** | ✅ None | No compiled binaries, no hardware drivers |
-| **Test Coverage** | ✅ Excellent | 26 Rust tests + Terra Luna Replay |
+| **Test Coverage** | ✅ Excellent | 196 Rust tests + Terra Luna Replay |
 | **Performance Degradation** | ⚠️ High | 1000x slower latency (ACCEPTABLE for agents) |
 
 ---
@@ -65,7 +65,7 @@ This HFT codebase **can and should** be migrated to a Poly-Agent Architecture (S
    - Shared memory config → Firestore
 
 3. **Comprehensive Tests**
-   - 26 unit tests validate every function
+   - 196 tests validate every function across all modules
    - Terra Luna Replay test (already Python!) proves crisis protocols
    - Can port tests first, then implement (TDD)
 
@@ -149,8 +149,16 @@ def execute_crisis_protocol(market_data: dict) -> dict:
 **Actual Dependencies:**
 ```toml
 [dependencies]
-log = "0.4"           # Pure Rust logging
+log = "0.4"           # Logging
 env_logger = "0.11"   # Environment-based log config
+serde = "1.0"         # Serialization
+serde_json = "1.0"    # JSON handling
+toml = "0.8"          # TOML config parsing
+tokio = "1"           # Async runtime
+tokio-tungstenite = "0.24"  # WebSocket
+notify = "7.0"        # File watching (hot reload)
+futures-util = "0.3"  # Async utilities
+regex = "1"           # Pattern matching
 
 [dev-dependencies]
 criterion = "0.5"     # Benchmarking (only for testing)
@@ -223,7 +231,7 @@ A comprehensive 21,000-character prompt has been prepared in `OPUS_46_PROMPT.md`
 
 1. **Source Files:** Exact line numbers for Rust functions to port
 2. **Task Breakdown:** 5 concrete tasks with code scaffolds
-3. **Test Strategy:** Port all 26 Rust unit tests + Terra Luna Replay
+3. **Test Strategy:** Port all 196 Rust tests + Terra Luna Replay
 4. **Success Criteria:** 7 measurable goals
 5. **Performance Targets:** Relaxed from 120µs to 500ms (1000x slower, OK)
 6. **GCP Integration:** Pub/Sub, Firestore, Cloud Logging examples
@@ -239,10 +247,10 @@ A comprehensive 21,000-character prompt has been prepared in `OPUS_46_PROMPT.md`
 **README claims:** "Wire-to-Wire median of <100µs"
 
 **Reality:**
-- No UDP socket code in `main()`
+- UDP socket code exists in `main.rs` (binds to port 9999, processes packets) but no order execution
 - No order execution implemented
 - Benchmark measures in-process function calls (not network I/O)
-- The "hot path" is 8 floating-point operations
+- The core "hot path" performs crisis evaluation and sleeve signal computation (simple conditionals and arithmetic)
 
 **Verdict:** This is **aspirational architecture** without production infrastructure.
 
@@ -292,7 +300,7 @@ This FastAPI app:
 
 The migration is **SUCCESSFUL** if:
 
-1. ✅ All 26 Rust unit tests pass in Python
+1. ✅ All 196 Rust tests pass in Python equivalents
 2. ✅ Terra Luna Replay test validates crisis protocols
 3. ✅ Agent latency p99 < 500ms (within budget)
 4. ✅ Streamlit dashboard displays real-time agent decisions
@@ -307,7 +315,7 @@ The migration is **SUCCESSFUL** if:
 ### What Makes This Feasible
 
 1. ✅ **Pure Functions:** No hidden state, no side effects
-2. ✅ **Comprehensive Tests:** 26 unit tests validate every function
+2. ✅ **Comprehensive Tests:** 196 tests validate every function across 5 sleeves
 3. ✅ **Simple Concurrency:** Single-threaded design, no real race conditions
 4. ✅ **70% Already Python:** Dashboard and tests already work
 5. ✅ **No Exotic Dependencies:** Pure Rust, no hardware drivers
@@ -334,7 +342,7 @@ The migration is **SUCCESSFUL** if:
 |--------|--------------|---------------------|-------------|
 | **Latency (p99)** | <120µs | <500ms | ✅ Yes (agents operate at human timescale) |
 | **Throughput** | 1M+ ticks/sec | 10-100 ticks/sec | ✅ Yes (API rate limits) |
-| **Complexity** | 450 lines Rust | ~200 lines Python | ✅ Yes (simpler is better) |
+| **Complexity** | ~3,500 lines Rust (8 modules) | ~500 lines Python | ✅ Yes (simpler is better) |
 | **Maintenance** | Rust expertise | Python + Vertex AI | ✅ Yes (broader talent pool) |
 
 **Rationale:** Agents provide **decision support** for human traders, not microsecond execution. The 1000x latency increase is acceptable because:
