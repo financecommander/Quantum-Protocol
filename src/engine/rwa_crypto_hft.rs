@@ -6,8 +6,6 @@
 //! - Crypto/fiat spread monitoring
 //! - RWA tokenization price discovery
 
-use super::{AuditEventType, AuditRecord};
-
 // ---------------------------------------------------------------------------
 // Arbitrage Opportunity
 // ---------------------------------------------------------------------------

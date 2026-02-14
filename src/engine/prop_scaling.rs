@@ -9,7 +9,6 @@
 //! - Sync lag monitoring (<100µs threshold)
 //! - Daily reset with margin validation
 
-use super::{AuditEventType, AuditRecord};
 use crate::{FillEvent, RejectionEvent, RejectionReason, Side};
 
 // ---------------------------------------------------------------------------
@@ -150,7 +149,7 @@ impl PropScalingEngine {
 
         // Fan out to active accounts (distribute pro-rata)
         if self.num_active_accounts > 0 {
-            let qty_per_account = fill.qty / self.num_active_accounts as i32;
+            let _qty_per_account = fill.qty / self.num_active_accounts as i32;
             for account in self.accounts.iter_mut() {
                 if account.status == PropAccountStatus::Active {
                     account.target_position = self.master.position;

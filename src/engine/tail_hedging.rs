@@ -6,8 +6,6 @@
 //! - Volatility regime monitoring
 //! - Crisis protocol integration
 
-use super::{AuditEventType, AuditRecord};
-
 // ---------------------------------------------------------------------------
 // Hedging Instrument
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 //!
 //! Integrates the Tail Hedging engine with the main trading loop.
 
-use crate::tail_hedging::{HedgeInstrument, HedgePosition, TailHedgingEngine, TailRiskLevel};
+use crate::tail_hedging::{HedgeInstrument, TailHedgingEngine, TailRiskLevel};
 use crate::{AuditEventType, AuditRecord, AuditRing, MarketPacket, SharedConfig};
 
 /// Update tail hedging engine with market data
@@ -104,6 +104,7 @@ pub fn check_tail_crisis_threshold(engine: &TailHedgingEngine, packet: &MarketPa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tail_hedging::HedgePosition;
 
     fn make_packet(vix: f64) -> MarketPacket {
         MarketPacket {
