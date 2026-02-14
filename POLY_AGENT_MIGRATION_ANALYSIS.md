@@ -744,7 +744,7 @@ This codebase is a **perfect candidate** for Poly-Agent migration because:
 2. ✅ **100% Logic Portability** — All algorithms are pure functions that translate directly to Python
 3. ✅ **No Dependency Hell** — No kernel bypass, no compiled binaries, no exotic libraries
 4. ✅ **70% Already Python** — The dashboard and tests are already in Python and working
-5. ✅ **Modular Core Logic** — The "Iron Core" consists of simple signal computations and 5 independently portable sleeves (~3,500 lines total)
+5. ✅ **Modular Core Logic** — The "Iron Core" consists of crisis evaluation (VIX/depeg thresholds), spread-based signal generation, and 5 independently portable sleeves including prop account sync, cross-venue arbitrage, and VIX-based hedge rebalancing (~3,500 lines total)
 
 **The Opus 4.6 Advantage:**
 - Can handle the "complex" Rust patterns (atomics, ring buffers) and distill them to simple Python
