@@ -72,7 +72,7 @@ This HFT codebase **can and should** be migrated to a Poly-Agent Architecture (S
 4. **70% Already Python**
    - FastAPI dashboard works (14 tests passing)
    - Quantum training script uses Qiskit (pure Python)
-   - Only the 450-line Rust engine needs porting
+   - Only the ~3,500-line Rust engine (across 8 modules) needs porting
 
 ---
 
