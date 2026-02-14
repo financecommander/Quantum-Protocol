@@ -464,7 +464,7 @@ heartbeat_max_lag_us = 100
     #[test]
     fn test_validate_valid() {
         let config: QuantumConfig = toml::from_str(minimal_toml()).unwrap();
-        assert!(validate_config(&config).is_ok());
+        validate_config(&config).unwrap();
     }
 
     #[test]
@@ -621,7 +621,7 @@ email_to = ""
 cooldown_secs = 300
 "#;
         let config: QuantumConfig = toml::from_str(raw).unwrap();
-        assert!(validate_config(&config).is_ok());
+        validate_config(&config).unwrap();
         assert_eq!(config.feeds.symbols.len(), 2);
         assert_eq!(config.sleeves.treasury_basis.weight, 0.2);
         assert_eq!(config.monitoring.audit_retention_days, 2555);
