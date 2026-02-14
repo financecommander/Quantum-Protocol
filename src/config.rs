@@ -1,431 +1,240 @@
-//! Configuration System for Quantum Protocol HFT Engine
+//! Configuration System
 //!
-//! TOML-based configuration with:
-//! - Hot reload via `notify` crate
-//! - Environment variable substitution (`${ENV_VAR}` patterns)
-//! - Schema validation at load time
+//! TOML-based configuration with hot reload, schema validation, and environment variable substitution.
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use regex::Regex;
+use anyhow::{Context, Result};
+use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::watch;
 
 // ---------------------------------------------------------------------------
-// Configuration Structs
+// Configuration Structures
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug, Deserialize)]
+/// Main configuration structure for the Quantum Protocol engine
+#[derive(Debug, Clone, Deserialize)]
 pub struct QuantumConfig {
     pub engine: EngineConfig,
-    #[serde(default)]
-    pub sleeves: SleevesConfig,
-    #[serde(default)]
+    pub sleeves: SleeveConfigs,
     pub risk: RiskConfig,
-    #[serde(default)]
     pub monitoring: MonitoringConfig,
-    #[serde(default)]
     pub feeds: FeedsConfig,
-    #[serde(default)]
     pub alerts: AlertsConfig,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct EngineConfig {
-    #[serde(default = "default_udp_addr")]
     pub udp_addr: String,
-    #[serde(default = "default_max_position")]
-    pub max_position: f64,
-    #[serde(default = "default_hedge_ratio")]
-    pub hedge_ratio: f64,
-    #[serde(default = "default_true")]
-    pub circuit_breaker_enabled: bool,
-    #[serde(default = "default_heartbeat_max_lag_us")]
-    pub heartbeat_max_lag_us: u64,
+    pub metrics_port: u16,
+    pub graceful_shutdown_timeout_secs: u64,
 }
 
-impl Default for EngineConfig {
-    fn default() -> Self {
-        Self {
-            udp_addr: default_udp_addr(),
-            max_position: default_max_position(),
-            hedge_ratio: default_hedge_ratio(),
-            circuit_breaker_enabled: true,
-            heartbeat_max_lag_us: default_heartbeat_max_lag_us(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-pub struct SleevesConfig {
-    #[serde(default)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct SleeveConfigs {
     pub treasury_basis: TreasuryBasisConfig,
-    #[serde(default)]
     pub vol_regime: VolRegimeConfig,
-    #[serde(default)]
     pub prop_scaling: PropScalingConfig,
-    #[serde(default)]
     pub rwa_crypto: RwaCryptoConfig,
-    #[serde(default)]
     pub tail_hedging: TailHedgingConfig,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct TreasuryBasisConfig {
-    #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default = "default_weight")]
-    pub weight: f64,
+    pub hedge_ratio: f64,
+    pub max_position: f64,
 }
 
-impl Default for TreasuryBasisConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            weight: default_weight(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct VolRegimeConfig {
-    #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default = "default_vol_threshold_low")]
     pub threshold_low: f64,
-    #[serde(default = "default_vol_threshold_high")]
     pub threshold_high: f64,
 }
 
-impl Default for VolRegimeConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            threshold_low: default_vol_threshold_low(),
-            threshold_high: default_vol_threshold_high(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct PropScalingConfig {
-    #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default = "default_max_accounts")]
-    pub max_accounts: usize,
-    #[serde(default = "default_min_equity")]
-    pub min_equity: f64,
+    pub master_account_id: u8,
+    pub satellite_account_ids: Vec<u8>,
 }
 
-impl Default for PropScalingConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            max_accounts: default_max_accounts(),
-            min_equity: default_min_equity(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct RwaCryptoConfig {
-    #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default = "default_min_spread_bps")]
-    pub min_spread_bps: f64,
+    pub depeg_threshold: f64,
 }
 
-impl Default for RwaCryptoConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            min_spread_bps: default_min_spread_bps(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct TailHedgingConfig {
-    #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default = "default_vix_critical")]
-    pub vix_critical_threshold: f64,
+    pub vix_call_strike_offset: f64,
+    pub put_strike_offset: f64,
 }
 
-impl Default for TailHedgingConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            vix_critical_threshold: default_vix_critical(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct RiskConfig {
-    #[serde(default = "default_max_position_per_symbol")]
-    pub max_position_per_symbol: f64,
-    #[serde(default = "default_max_portfolio_position")]
-    pub max_portfolio_position: f64,
-    #[serde(default = "default_max_daily_loss")]
+    pub max_position_size: i64,
+    pub max_notional: f64,
     pub max_daily_loss: f64,
-    #[serde(default = "default_max_consecutive_rejections")]
-    pub max_consecutive_rejections: u32,
-    #[serde(default = "default_heartbeat_timeout_ms")]
-    pub heartbeat_timeout_ms: u64,
+    pub kill_switch_consecutive_rejections: u32,
+    pub kill_switch_heartbeat_timeout_ms: u64,
 }
 
-impl Default for RiskConfig {
-    fn default() -> Self {
-        Self {
-            max_position_per_symbol: default_max_position_per_symbol(),
-            max_portfolio_position: default_max_portfolio_position(),
-            max_daily_loss: default_max_daily_loss(),
-            max_consecutive_rejections: default_max_consecutive_rejections(),
-            heartbeat_timeout_ms: default_heartbeat_timeout_ms(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct MonitoringConfig {
-    #[serde(default = "default_metrics_port")]
-    pub metrics_port: u16,
-    #[serde(default = "default_audit_dir")]
     pub audit_log_dir: String,
-    #[serde(default = "default_audit_retention_days")]
     pub audit_retention_days: u32,
+    pub metrics_enabled: bool,
 }
 
-impl Default for MonitoringConfig {
-    fn default() -> Self {
-        Self {
-            metrics_port: default_metrics_port(),
-            audit_log_dir: default_audit_dir(),
-            audit_retention_days: default_audit_retention_days(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct FeedsConfig {
-    #[serde(default = "default_ws_url")]
-    pub ws_url: String,
-    #[serde(default)]
-    pub api_key: String,
-    #[serde(default)]
+    pub market_data_ws_url: String,
+    pub market_data_api_key: String,
     pub symbols: Vec<String>,
-    #[serde(default = "default_heartbeat_interval_ms")]
     pub heartbeat_interval_ms: u64,
-    #[serde(default = "default_reconnect_max_delay_ms")]
-    pub reconnect_max_delay_ms: u64,
+    pub reconnect_max_delay_secs: u64,
 }
 
-impl Default for FeedsConfig {
-    fn default() -> Self {
-        Self {
-            ws_url: default_ws_url(),
-            api_key: String::new(),
-            symbols: Vec::new(),
-            heartbeat_interval_ms: default_heartbeat_interval_ms(),
-            reconnect_max_delay_ms: default_reconnect_max_delay_ms(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AlertsConfig {
-    #[serde(default)]
     pub slack_webhook_url: String,
-    #[serde(default)]
-    pub email_to: String,
-    #[serde(default = "default_alert_cooldown_secs")]
-    pub cooldown_secs: u64,
-}
-
-impl Default for AlertsConfig {
-    fn default() -> Self {
-        Self {
-            slack_webhook_url: String::new(),
-            email_to: String::new(),
-            cooldown_secs: default_alert_cooldown_secs(),
-        }
-    }
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub smtp_user: String,
+    pub smtp_pass: String,
+    pub alert_email_to: String,
+    pub alert_cooldown_secs: u64,
 }
 
 // ---------------------------------------------------------------------------
-// Default value functions
+// Configuration Loading
 // ---------------------------------------------------------------------------
 
-fn default_udp_addr() -> String {
-    "0.0.0.0:9999".to_string()
-}
-fn default_max_position() -> f64 {
-    1_000_000.0
-}
-fn default_hedge_ratio() -> f64 {
-    0.8
-}
-fn default_true() -> bool {
-    true
-}
-fn default_heartbeat_max_lag_us() -> u64 {
-    100
-}
-fn default_weight() -> f64 {
-    0.125
-}
-fn default_vol_threshold_low() -> f64 {
-    15.0
-}
-fn default_vol_threshold_high() -> f64 {
-    30.0
-}
-fn default_max_accounts() -> usize {
-    32
-}
-fn default_min_equity() -> f64 {
-    2000.0
-}
-fn default_min_spread_bps() -> f64 {
-    5.0
-}
-fn default_vix_critical() -> f64 {
-    45.0
-}
-fn default_max_position_per_symbol() -> f64 {
-    100_000.0
-}
-fn default_max_portfolio_position() -> f64 {
-    5_000_000.0
-}
-fn default_max_daily_loss() -> f64 {
-    50_000.0
-}
-fn default_max_consecutive_rejections() -> u32 {
-    10
-}
-fn default_heartbeat_timeout_ms() -> u64 {
-    5000
-}
-fn default_metrics_port() -> u16 {
-    9090
-}
-fn default_audit_dir() -> String {
-    "/var/log/quantum".to_string()
-}
-fn default_audit_retention_days() -> u32 {
-    2555
-}
-fn default_ws_url() -> String {
-    "wss://feed.example.com/v1/market".to_string()
-}
-fn default_heartbeat_interval_ms() -> u64 {
-    1000
-}
-fn default_reconnect_max_delay_ms() -> u64 {
-    60000
-}
-fn default_alert_cooldown_secs() -> u64 {
-    300
-}
+/// Load configuration from a TOML file with environment variable substitution
+pub fn load_config(path: &str) -> Result<QuantumConfig> {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read config file: {}", path))?;
 
-// ---------------------------------------------------------------------------
-// Environment variable substitution
-// ---------------------------------------------------------------------------
+    // Perform environment variable substitution
+    let content = substitute_env_vars(&content);
 
-/// Replace `${ENV_VAR}` patterns in a string with actual env var values.
-pub fn substitute_env_vars(input: &str) -> String {
-    let re = Regex::new(r"\$\{([^}]+)\}").unwrap();
-    re.replace_all(input, |caps: &regex::Captures| {
-        let var_name = &caps[1];
-        std::env::var(var_name).unwrap_or_default()
-    })
-    .to_string()
-}
+    let config: QuantumConfig = toml::from_str(&content)
+        .with_context(|| format!("Failed to parse config file: {}", path))?;
 
-// ---------------------------------------------------------------------------
-// Validation
-// ---------------------------------------------------------------------------
-
-/// Validate configuration values are within acceptable ranges.
-pub fn validate_config(config: &QuantumConfig) -> Result<(), String> {
-    if config.engine.max_position <= 0.0 {
-        return Err("engine.max_position must be positive".to_string());
-    }
-    if config.engine.hedge_ratio <= 0.0 || config.engine.hedge_ratio > 1.0 {
-        return Err("engine.hedge_ratio must be in (0.0, 1.0]".to_string());
-    }
-    if config.sleeves.vol_regime.threshold_low >= config.sleeves.vol_regime.threshold_high {
-        return Err("vol_regime.threshold_low must be < threshold_high".to_string());
-    }
-    if config.risk.max_daily_loss <= 0.0 {
-        return Err("risk.max_daily_loss must be positive".to_string());
-    }
-    if config.risk.max_position_per_symbol <= 0.0 {
-        return Err("risk.max_position_per_symbol must be positive".to_string());
-    }
-    if config.risk.max_portfolio_position <= 0.0 {
-        return Err("risk.max_portfolio_position must be positive".to_string());
-    }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Loading
-// ---------------------------------------------------------------------------
-
-/// Load and validate configuration from a TOML file.
-pub fn load_config(path: &str) -> Result<QuantumConfig, String> {
-    let raw = std::fs::read_to_string(path).map_err(|e| format!("read config: {e}"))?;
-    let substituted = substitute_env_vars(&raw);
-    let config: QuantumConfig =
-        toml::from_str(&substituted).map_err(|e| format!("parse config: {e}"))?;
+    // Validate the configuration
     validate_config(&config)?;
+
     Ok(config)
 }
 
-/// Convert a `QuantumConfig` to the engine's `SharedConfig`.
-pub fn to_shared_config(qc: &QuantumConfig) -> crate::engine::common::SharedConfig {
-    crate::engine::common::SharedConfig {
-        hedge_ratio: qc.engine.hedge_ratio,
-        max_position: qc.engine.max_position,
-        vol_regime_threshold_low: qc.sleeves.vol_regime.threshold_low,
-        vol_regime_threshold_high: qc.sleeves.vol_regime.threshold_high,
-        quantum_weights: [0.125; 8],
-        circuit_breaker_enabled: qc.engine.circuit_breaker_enabled,
-        heartbeat_max_lag_us: qc.engine.heartbeat_max_lag_us,
+/// Substitute environment variables in the format ${ENV_VAR}
+fn substitute_env_vars(content: &str) -> String {
+    let mut result = content.to_string();
+    let re = regex::Regex::new(r"\$\{([A-Z_][A-Z0-9_]*)\}").unwrap();
+
+    for cap in re.captures_iter(content) {
+        let env_var = &cap[1];
+        if let Ok(value) = std::env::var(env_var) {
+            result = result.replace(&cap[0], &value);
+        }
     }
+
+    result
+}
+
+/// Validate configuration values
+fn validate_config(config: &QuantumConfig) -> Result<()> {
+    // Validate risk config
+    if config.risk.max_position_size <= 0 {
+        anyhow::bail!("risk.max_position_size must be positive");
+    }
+    if config.risk.max_notional <= 0.0 {
+        anyhow::bail!("risk.max_notional must be positive");
+    }
+    if config.risk.max_daily_loss >= 0.0 {
+        anyhow::bail!("risk.max_daily_loss must be negative");
+    }
+
+    // Validate sleeve configs
+    if config.sleeves.treasury_basis.enabled {
+        if config.sleeves.treasury_basis.hedge_ratio <= 0.0
+            || config.sleeves.treasury_basis.hedge_ratio > 1.0
+        {
+            anyhow::bail!("treasury_basis.hedge_ratio must be in (0, 1]");
+        }
+    }
+
+    if config.sleeves.vol_regime.enabled {
+        if config.sleeves.vol_regime.threshold_low >= config.sleeves.vol_regime.threshold_high {
+            anyhow::bail!("vol_regime.threshold_low must be less than threshold_high");
+        }
+    }
+
+    // Validate feeds config
+    if config.feeds.symbols.is_empty() {
+        anyhow::bail!("feeds.symbols cannot be empty");
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
 // Hot Reload
 // ---------------------------------------------------------------------------
 
-/// Watch a config file for changes and send updated configs through a channel.
-pub fn watch_config(
-    path: &str,
-    tx: tokio::sync::watch::Sender<QuantumConfig>,
-) -> Result<RecommendedWatcher, String> {
-    let path_buf = std::path::PathBuf::from(path);
-    let path_clone = path_buf.clone();
+/// Watch configuration file for changes and send updates through the channel
+pub async fn watch_config(
+    path: String,
+    tx: watch::Sender<QuantumConfig>,
+) -> Result<()> {
+    let path_arc = Arc::new(path.clone());
+    let tx_arc = Arc::new(tx);
 
-    let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, _>| {
-        if let Ok(event) = res {
-            if event.kind.is_modify() {
-                if let Ok(config) = load_config(path_clone.to_str().unwrap_or_default()) {
-                    let _ = tx.send(config);
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(100);
+
+    // Create watcher
+    let mut watcher: RecommendedWatcher = notify::recommended_watcher(
+        move |res: Result<Event, notify::Error>| {
+            if let Ok(event) = res {
+                if matches!(
+                    event.kind,
+                    notify::EventKind::Modify(_) | notify::EventKind::Create(_)
+                ) {
+                    let _ = event_tx.blocking_send(());
+                }
+            }
+        },
+    )?;
+
+    watcher.watch(Path::new(&path), RecursiveMode::NonRecursive)?;
+
+    log::info!("Watching config file for changes: {}", path);
+
+    // Keep watcher alive and process events
+    loop {
+        tokio::select! {
+            Some(_) = event_rx.recv() => {
+                log::info!("Config file changed, reloading...");
+                match load_config(&path_arc) {
+                    Ok(new_config) => {
+                        if let Err(e) = tx_arc.send(new_config) {
+                            log::error!("Failed to send config update: {}", e);
+                        } else {
+                            log::info!("Config reloaded successfully");
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to reload config: {}", e);
+                    }
                 }
             }
         }
-    })
-    .map_err(|e| format!("create watcher: {e}"))?;
-
-    let parent = path_buf.parent().unwrap_or_else(|| Path::new("."));
-    watcher
-        .watch(parent, RecursiveMode::NonRecursive)
-        .map_err(|e| format!("watch config: {e}"))?;
-
-    Ok(watcher)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -435,148 +244,21 @@ pub fn watch_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
-    fn minimal_toml() -> &'static str {
-        r#"
+    #[test]
+    fn test_load_valid_config() {
+        let toml_content = r#"
 [engine]
 udp_addr = "0.0.0.0:9999"
-max_position = 1000000.0
-hedge_ratio = 0.8
-circuit_breaker_enabled = true
-heartbeat_max_lag_us = 100
-"#
-    }
-
-    #[test]
-    fn test_parse_minimal_config() {
-        let config: QuantumConfig = toml::from_str(minimal_toml()).unwrap();
-        assert_eq!(config.engine.udp_addr, "0.0.0.0:9999");
-        assert_eq!(config.engine.max_position, 1_000_000.0);
-    }
-
-    #[test]
-    fn test_defaults() {
-        let config: QuantumConfig = toml::from_str(minimal_toml()).unwrap();
-        assert_eq!(config.risk.max_daily_loss, 50_000.0);
-        assert_eq!(config.monitoring.metrics_port, 9090);
-    }
-
-    #[test]
-    fn test_validate_valid() {
-        let config: QuantumConfig = toml::from_str(minimal_toml()).unwrap();
-        assert!(validate_config(&config).is_ok());
-    }
-
-    #[test]
-    fn test_validate_bad_hedge_ratio() {
-        let raw = r#"
-[engine]
-max_position = 1000000.0
-hedge_ratio = 0.0
-"#;
-        let config: QuantumConfig = toml::from_str(raw).unwrap();
-        assert!(validate_config(&config).is_err());
-    }
-
-    #[test]
-    fn test_validate_bad_max_position() {
-        let raw = r#"
-[engine]
-max_position = -1.0
-hedge_ratio = 0.8
-"#;
-        let config: QuantumConfig = toml::from_str(raw).unwrap();
-        assert!(validate_config(&config).is_err());
-    }
-
-    #[test]
-    fn test_validate_bad_vol_thresholds() {
-        let raw = r#"
-[engine]
-max_position = 1000000.0
-hedge_ratio = 0.8
-
-[sleeves.vol_regime]
-threshold_low = 30.0
-threshold_high = 15.0
-"#;
-        let config: QuantumConfig = toml::from_str(raw).unwrap();
-        assert!(validate_config(&config).is_err());
-    }
-
-    #[test]
-    fn test_env_var_substitution() {
-        std::env::set_var("QP_TEST_VAR", "hello_world");
-        let result = substitute_env_vars("prefix_${QP_TEST_VAR}_suffix");
-        assert_eq!(result, "prefix_hello_world_suffix");
-        std::env::remove_var("QP_TEST_VAR");
-    }
-
-    #[test]
-    fn test_env_var_substitution_missing() {
-        std::env::remove_var("QP_MISSING_VAR");
-        let result = substitute_env_vars("${QP_MISSING_VAR}");
-        assert_eq!(result, "");
-    }
-
-    #[test]
-    fn test_env_var_substitution_no_vars() {
-        let result = substitute_env_vars("no variables here");
-        assert_eq!(result, "no variables here");
-    }
-
-    #[test]
-    fn test_to_shared_config() {
-        let config: QuantumConfig = toml::from_str(minimal_toml()).unwrap();
-        let shared = to_shared_config(&config);
-        assert_eq!(shared.hedge_ratio, 0.8);
-        assert_eq!(shared.max_position, 1_000_000.0);
-        assert!(shared.circuit_breaker_enabled);
-    }
-
-    #[test]
-    fn test_load_config_file() {
-        let dir = std::env::temp_dir().join("qp_config_test");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("test.toml");
-        std::fs::write(&path, minimal_toml()).unwrap();
-
-        let config = load_config(path.to_str().unwrap()).unwrap();
-        assert_eq!(config.engine.max_position, 1_000_000.0);
-
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn test_load_config_missing_file() {
-        assert!(load_config("/nonexistent/path.toml").is_err());
-    }
-
-    #[test]
-    fn test_load_config_invalid_toml() {
-        let dir = std::env::temp_dir().join("qp_config_bad");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("bad.toml");
-        std::fs::write(&path, "this is not valid toml {{{}}}").unwrap();
-
-        assert!(load_config(path.to_str().unwrap()).is_err());
-
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn test_full_config_parse() {
-        let raw = r#"
-[engine]
-udp_addr = "0.0.0.0:9999"
-max_position = 1000000.0
-hedge_ratio = 0.8
-circuit_breaker_enabled = true
-heartbeat_max_lag_us = 100
+metrics_port = 9090
+graceful_shutdown_timeout_secs = 30
 
 [sleeves.treasury_basis]
 enabled = true
-weight = 0.2
+hedge_ratio = 0.8
+max_position = 1000000.0
 
 [sleeves.vol_regime]
 enabled = true
@@ -585,62 +267,142 @@ threshold_high = 30.0
 
 [sleeves.prop_scaling]
 enabled = true
-max_accounts = 32
-min_equity = 2000.0
+master_account_id = 1
+satellite_account_ids = [2, 3, 4]
 
 [sleeves.rwa_crypto]
 enabled = true
-min_spread_bps = 5.0
+depeg_threshold = 5.0
 
 [sleeves.tail_hedging]
 enabled = true
-vix_critical_threshold = 45.0
+vix_call_strike_offset = 10.0
+put_strike_offset = 5.0
 
 [risk]
-max_position_per_symbol = 100000.0
-max_portfolio_position = 5000000.0
-max_daily_loss = 50000.0
-max_consecutive_rejections = 10
-heartbeat_timeout_ms = 5000
+max_position_size = 10000
+max_notional = 1000000.0
+max_daily_loss = -50000.0
+kill_switch_consecutive_rejections = 10
+kill_switch_heartbeat_timeout_ms = 5000
 
 [monitoring]
-metrics_port = 9090
 audit_log_dir = "/var/log/quantum"
 audit_retention_days = 2555
+metrics_enabled = true
 
 [feeds]
-ws_url = "wss://feed.example.com/v1/market"
-api_key = ""
-symbols = ["BTC-USD", "ETH-USD"]
-heartbeat_interval_ms = 1000
-reconnect_max_delay_ms = 60000
+market_data_ws_url = "wss://stream.data.alpaca.markets/v2/iex"
+market_data_api_key = "test_key"
+symbols = ["SPY", "QQQ", "UVXY"]
+heartbeat_interval_ms = 30000
+reconnect_max_delay_secs = 60
 
 [alerts]
-slack_webhook_url = ""
-email_to = ""
-cooldown_secs = 300
+slack_webhook_url = "https://hooks.slack.com/services/xxx"
+smtp_host = "smtp.gmail.com"
+smtp_port = 587
+smtp_user = "alerts@example.com"
+smtp_pass = "password"
+alert_email_to = "team@example.com"
+alert_cooldown_secs = 300
 "#;
-        let config: QuantumConfig = toml::from_str(raw).unwrap();
-        assert!(validate_config(&config).is_ok());
-        assert_eq!(config.feeds.symbols.len(), 2);
-        assert_eq!(config.sleeves.treasury_basis.weight, 0.2);
-        assert_eq!(config.monitoring.audit_retention_days, 2555);
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(toml_content.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config = load_config(temp_file.path().to_str().unwrap()).unwrap();
+        assert_eq!(config.engine.metrics_port, 9090);
+        assert_eq!(config.sleeves.treasury_basis.hedge_ratio, 0.8);
+        assert_eq!(config.feeds.symbols.len(), 3);
     }
 
     #[test]
-    fn test_env_var_in_config() {
-        std::env::set_var("QP_TEST_API_KEY", "secret123");
-        let raw = r#"
-[engine]
-max_position = 1000000.0
-hedge_ratio = 0.8
+    fn test_env_var_substitution() {
+        std::env::set_var("TEST_API_KEY", "secret123");
+        let content = "api_key = \"${TEST_API_KEY}\"";
+        let result = substitute_env_vars(content);
+        assert!(result.contains("secret123"));
+        std::env::remove_var("TEST_API_KEY");
+    }
 
-[feeds]
-api_key = "${QP_TEST_API_KEY}"
-"#;
-        let substituted = substitute_env_vars(raw);
-        let config: QuantumConfig = toml::from_str(&substituted).unwrap();
-        assert_eq!(config.feeds.api_key, "secret123");
-        std::env::remove_var("QP_TEST_API_KEY");
+    #[test]
+    fn test_validation_invalid_hedge_ratio() {
+        let mut config = create_test_config();
+        config.sleeves.treasury_basis.hedge_ratio = 1.5;
+        assert!(validate_config(&config).is_err());
+    }
+
+    #[test]
+    fn test_validation_invalid_thresholds() {
+        let mut config = create_test_config();
+        config.sleeves.vol_regime.threshold_low = 40.0;
+        config.sleeves.vol_regime.threshold_high = 30.0;
+        assert!(validate_config(&config).is_err());
+    }
+
+    fn create_test_config() -> QuantumConfig {
+        QuantumConfig {
+            engine: EngineConfig {
+                udp_addr: "0.0.0.0:9999".to_string(),
+                metrics_port: 9090,
+                graceful_shutdown_timeout_secs: 30,
+            },
+            sleeves: SleeveConfigs {
+                treasury_basis: TreasuryBasisConfig {
+                    enabled: true,
+                    hedge_ratio: 0.8,
+                    max_position: 1000000.0,
+                },
+                vol_regime: VolRegimeConfig {
+                    enabled: true,
+                    threshold_low: 15.0,
+                    threshold_high: 30.0,
+                },
+                prop_scaling: PropScalingConfig {
+                    enabled: true,
+                    master_account_id: 1,
+                    satellite_account_ids: vec![2, 3, 4],
+                },
+                rwa_crypto: RwaCryptoConfig {
+                    enabled: true,
+                    depeg_threshold: 5.0,
+                },
+                tail_hedging: TailHedgingConfig {
+                    enabled: true,
+                    vix_call_strike_offset: 10.0,
+                    put_strike_offset: 5.0,
+                },
+            },
+            risk: RiskConfig {
+                max_position_size: 10000,
+                max_notional: 1000000.0,
+                max_daily_loss: -50000.0,
+                kill_switch_consecutive_rejections: 10,
+                kill_switch_heartbeat_timeout_ms: 5000,
+            },
+            monitoring: MonitoringConfig {
+                audit_log_dir: "/var/log/quantum".to_string(),
+                audit_retention_days: 2555,
+                metrics_enabled: true,
+            },
+            feeds: FeedsConfig {
+                market_data_ws_url: "wss://test".to_string(),
+                market_data_api_key: "key".to_string(),
+                symbols: vec!["SPY".to_string()],
+                heartbeat_interval_ms: 30000,
+                reconnect_max_delay_secs: 60,
+            },
+            alerts: AlertsConfig {
+                slack_webhook_url: "https://test".to_string(),
+                smtp_host: "smtp.test".to_string(),
+                smtp_port: 587,
+                smtp_user: "user".to_string(),
+                smtp_pass: "pass".to_string(),
+                alert_email_to: "test@test".to_string(),
+                alert_cooldown_secs: 300,
+            },
+        }
     }
 }
