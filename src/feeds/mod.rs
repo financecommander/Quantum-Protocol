@@ -1,7 +1,12 @@
 //! Data Feed Layer
 //!
-//! WebSocket market data, execution, and options chain feeds.
+//! WebSocket and async data feed handlers for market data, execution, and options.
 
-pub mod execution;
 pub mod market_data;
+pub mod execution;
+pub mod options;
 pub mod options_chain;
+
+pub use market_data::*;
+pub use execution::*;
+pub use options::*;

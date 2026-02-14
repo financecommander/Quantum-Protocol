@@ -19,9 +19,18 @@ tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 notify = "7.0"
 futures-util = "0.3"
 regex = "1"
+anyhow = "1.0"
+thiserror = "1.0"
+prometheus = "0.13"
+reqwest = { version = "0.11", features = ["json"] }
+chrono = { version = "0.4", features = ["serde"] }
+hyper = { version = "1", features = ["server", "http1"] }
+http-body-util = "0.1"
+hyper-util = { version = "0.1", features = ["tokio"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3.8"
 
 [[bench]]
 name = "latency_bench"
@@ -38,4 +47,3 @@ harness = false
 [[bench]]
 name = "tail_hedging_bench"
 harness = false
-
