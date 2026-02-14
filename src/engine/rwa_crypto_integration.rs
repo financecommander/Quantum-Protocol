@@ -2,7 +2,7 @@
 //!
 //! Integrates the RWA/Crypto HFT engine with the main trading loop.
 
-use crate::rwa_crypto_hft::{ArbitrageOpportunity, CryptoPair, RwaCryptoEngine};
+use crate::rwa_crypto_hft::{CryptoPair, RwaCryptoEngine};
 use crate::{AuditEventType, AuditRecord, AuditRing, MarketPacket, SharedConfig};
 
 /// Update RWA/Crypto engine with market data
@@ -98,6 +98,7 @@ pub fn report_rwa_crypto_performance(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rwa_crypto_hft::ArbitrageOpportunity;
 
     fn make_packet(symbol_id: u32, bid: f64, ask: f64, volume: u64) -> MarketPacket {
         MarketPacket {

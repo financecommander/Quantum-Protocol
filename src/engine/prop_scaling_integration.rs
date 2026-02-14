@@ -3,11 +3,8 @@
 //! Integrates the PropScalingEngine with the main trading engine loop.
 //! Handles market data updates, fill/rejection events, and audit logging.
 
-use crate::prop_scaling::{PropAccountStatus, PropScalingEngine};
-use crate::{
-    AuditEventType, AuditRecord, AuditRing, FillEvent, MarketPacket, RejectionEvent, SharedConfig,
-    Side,
-};
+use crate::prop_scaling::PropScalingEngine;
+use crate::{AuditEventType, AuditRecord, AuditRing, FillEvent, MarketPacket, SharedConfig, Side};
 
 /// Update prop scaling targets based on market conditions
 pub fn update_prop_scaling_targets(
@@ -123,6 +120,7 @@ pub fn simulate_prop_fill(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::prop_scaling::PropAccountStatus;
 
     fn make_packet(vix: f64, bid: f64, ask: f64, last: f64) -> MarketPacket {
         MarketPacket {
