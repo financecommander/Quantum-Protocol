@@ -28,9 +28,10 @@
 **Question:** Can Rust trading algorithms be converted to Python Tools for AI Agents?
 
 **Answer:** ✅ **100% PORTABLE**
-- All algorithms are pure functions (8 FLOPs total)
+- Core algorithms are pure functions (crisis: 3 conditionals; 2 core sleeve signals: simple arithmetic)
+- Additional sleeves (Prop Scaling, RWA/Crypto, Tail Hedging) are stateful but modular — independently portable
 - Crisis protocol: 3 conditionals → one-liner ternary
-- Sleeve signals: 2 arithmetic functions → direct translation
+- All 5 sleeves: direct translation to Python classes
 
 #### 3. Dependency Hell
 **Question:** Are there libraries that require compiled binaries?
@@ -71,7 +72,7 @@
 **21,000-character prompt for Claude Opus 4.6**
 - 5 concrete tasks with code scaffolds
 - Exact line numbers for Rust functions to port
-- Test porting strategy (all 26 tests)
+- Test porting strategy (all 196 tests across 5 sleeves)
 - GCP integration examples (Pub/Sub, Firestore, Cloud Logging)
 - Success criteria (7 measurable goals)
 
@@ -147,9 +148,9 @@ The migration is **SUCCESSFUL** if:
 
 This codebase is a **perfect case study** for migration because:
 
-1. **Well-Architected but Over-Engineered**
-   - Sub-100µs latency for 8 FLOPs is overkill
-   - Ring buffers solving problems that don't exist
+1. **Well-Architected but Over-Engineered for Current Use Case**
+   - Sub-100µs latency infrastructure for core logic that could run in milliseconds
+   - Ring buffers and atomics for what are effectively simple signal computations
    - Shared memory for rare config updates
 
 2. **Excellent Documentation via Code**
