@@ -5,7 +5,6 @@
 use anyhow::{Context, Result};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -161,18 +160,17 @@ fn validate_config(config: &QuantumConfig) -> Result<()> {
     }
 
     // Validate sleeve configs
-    if config.sleeves.treasury_basis.enabled {
-        if config.sleeves.treasury_basis.hedge_ratio <= 0.0
-            || config.sleeves.treasury_basis.hedge_ratio > 1.0
-        {
-            anyhow::bail!("treasury_basis.hedge_ratio must be in (0, 1]");
-        }
+    if config.sleeves.treasury_basis.enabled
+        && (config.sleeves.treasury_basis.hedge_ratio <= 0.0
+            || config.sleeves.treasury_basis.hedge_ratio > 1.0)
+    {
+        anyhow::bail!("treasury_basis.hedge_ratio must be in (0, 1]");
     }
 
-    if config.sleeves.vol_regime.enabled {
-        if config.sleeves.vol_regime.threshold_low >= config.sleeves.vol_regime.threshold_high {
-            anyhow::bail!("vol_regime.threshold_low must be less than threshold_high");
-        }
+    if config.sleeves.vol_regime.enabled
+        && config.sleeves.vol_regime.threshold_low >= config.sleeves.vol_regime.threshold_high
+    {
+        anyhow::bail!("vol_regime.threshold_low must be less than threshold_high");
     }
 
     // Validate feeds config
@@ -188,18 +186,15 @@ fn validate_config(config: &QuantumConfig) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 /// Watch configuration file for changes and send updates through the channel
-pub async fn watch_config(
-    path: String,
-    tx: watch::Sender<QuantumConfig>,
-) -> Result<()> {
+pub async fn watch_config(path: String, tx: watch::Sender<QuantumConfig>) -> Result<()> {
     let path_arc = Arc::new(path.clone());
     let tx_arc = Arc::new(tx);
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(100);
 
     // Create watcher
-    let mut watcher: RecommendedWatcher = notify::recommended_watcher(
-        move |res: Result<Event, notify::Error>| {
+    let mut watcher: RecommendedWatcher =
+        notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
             if let Ok(event) = res {
                 if matches!(
                     event.kind,
@@ -208,8 +203,7 @@ pub async fn watch_config(
                     let _ = event_tx.blocking_send(());
                 }
             }
-        },
-    )?;
+        })?;
 
     watcher.watch(Path::new(&path), RecursiveMode::NonRecursive)?;
 

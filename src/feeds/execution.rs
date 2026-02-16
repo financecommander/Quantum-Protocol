@@ -2,7 +2,7 @@
 //!
 //! Monitors order fills and rejections from broker connections.
 
-use crate::engine::{now_ns, FillEvent, RejectionEvent, RejectionReason, Side};
+use crate::engine::{FillEvent, RejectionEvent, RejectionReason, Side};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -162,6 +162,7 @@ fn parse_rejection_reason(reason: &str) -> RejectionReason {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::now_ns;
 
     #[tokio::test]
     async fn test_fill_processing() {

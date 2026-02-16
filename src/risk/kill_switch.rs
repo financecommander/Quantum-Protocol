@@ -7,7 +7,6 @@ use anyhow::Result;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use thiserror::Error;
 
 // ---------------------------------------------------------------------------
 // Kill Switch Status
@@ -130,7 +129,9 @@ impl KillSwitch {
 
         if self.is_triggered.load(Ordering::SeqCst) {
             return KillSwitchStatus::Triggered(
-                self.trigger_reason.clone().unwrap_or(TriggerReason::ManualTrigger),
+                self.trigger_reason
+                    .clone()
+                    .unwrap_or(TriggerReason::ManualTrigger),
             );
         }
 

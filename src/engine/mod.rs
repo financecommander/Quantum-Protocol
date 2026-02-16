@@ -8,11 +8,11 @@ pub use common::*;
 pub mod coordinator;
 pub mod prop_scaling;
 pub mod prop_scaling_integration;
+pub mod quantum_engine;
 pub mod rwa_crypto_hft;
 pub mod rwa_crypto_integration;
 pub mod tail_hedging;
 pub mod tail_hedging_integration;
-pub mod quantum_engine;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 

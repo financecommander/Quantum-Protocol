@@ -3,10 +3,8 @@
 //! Orchestrates all trading sleeves, feeds, risk management, and monitoring.
 
 use crate::config::QuantumConfig;
-use crate::engine::{
-    now_ns, AuditEventType, AuditRecord, AuditRing, MarketPacket, SharedConfig, Side,
-};
-use crate::feeds::{ExecutionFeed, FillMessage, MarketDataFeed, OptionChainFeed, RejectionMessage};
+use crate::engine::{now_ns, AuditEventType, AuditRecord, AuditRing, MarketPacket, SharedConfig};
+// Feeds are available but not yet integrated
 use crate::monitoring::{Alert, AlertManager, AuditLogger, MetricsCollector, Severity};
 use crate::risk::{KillSwitch, KillSwitchStatus, PositionLimit, RiskLimits};
 use anyhow::Result;
@@ -27,6 +25,7 @@ pub struct QuantumEngine {
     ticks_processed: u64,
 
     // Risk management
+    #[allow(dead_code)]
     risk_limits: RiskLimits,
     kill_switch: KillSwitch,
 
@@ -212,13 +211,14 @@ impl QuantumEngine {
         let start_time = now_ns();
 
         // Evaluate crisis state (from existing engine logic)
-        let crisis_state = crate::engine::evaluate_crisis(packet);
+        let _crisis_state = crate::engine::evaluate_crisis(packet);
 
         // Process sleeves based on configuration
         if self.config.sleeves.treasury_basis.enabled {
             let signal = crate::engine::sleeve_treasury_basis(packet, &self.shared_config);
             self.record_sleeve_signal(1, signal, packet.timestamp_ns);
-            self.metrics.update_sleeve_pnl("treasury_basis", signal * 1000.0);
+            self.metrics
+                .update_sleeve_pnl("treasury_basis", signal * 1000.0);
         }
 
         if self.config.sleeves.vol_regime.enabled {
@@ -234,7 +234,7 @@ impl QuantumEngine {
         self.metrics.increment_ticks("market_data");
 
         // Log heartbeat periodically
-        if self.ticks_processed % 10000 == 0 {
+        if self.ticks_processed.is_multiple_of(10000) {
             self.record_heartbeat();
             log::info!(
                 "Processed {} ticks, avg latency: {}ns",
@@ -316,12 +316,18 @@ impl QuantumEngine {
         let alert = Alert::new(
             Severity::Info,
             "Engine Shutdown",
-            format!("Quantum Protocol Engine shutdown. Total ticks processed: {}", self.ticks_processed),
+            format!(
+                "Quantum Protocol Engine shutdown. Total ticks processed: {}",
+                self.ticks_processed
+            ),
             "quantum_engine",
         );
         self.alert_manager.send_alert(alert).await;
 
-        log::info!("Graceful shutdown complete. Ticks processed: {}", self.ticks_processed);
+        log::info!(
+            "Graceful shutdown complete. Ticks processed: {}",
+            self.ticks_processed
+        );
         Ok(())
     }
 

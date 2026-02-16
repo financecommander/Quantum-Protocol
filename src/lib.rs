@@ -6,11 +6,11 @@
 //! This library exposes the engine module for use by the binary crate
 //! and benchmarks.
 
-pub mod engine;
 pub mod config;
+pub mod engine;
 pub mod feeds;
-pub mod risk;
 pub mod monitoring;
+pub mod risk;
 
 // Re-export commonly used types
 pub use engine::*;

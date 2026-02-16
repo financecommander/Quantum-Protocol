@@ -6,7 +6,6 @@ use crate::engine::{hash_symbol, now_ns, MarketPacket};
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -16,6 +15,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 // Market Data Message Types
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "T")]
 enum MarketDataMessage {
@@ -51,6 +51,7 @@ struct QuoteMessage {
     timestamp: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Serialize)]
 struct BarMessage {
     #[serde(rename = "S")]
@@ -61,6 +62,7 @@ struct BarMessage {
     volume: u64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct SubscribeRequest {
     action: String,
@@ -250,16 +252,18 @@ impl MarketDataFeed {
     async fn send_packet_from_trade(&mut self, trade: &TradeMessage) -> Result<()> {
         let packet = MarketPacket {
             symbol_id: hash_symbol(&trade.symbol),
-            bid: 0.0,  // Not available in trade message
-            ask: 0.0,  // Not available in trade message
+            bid: 0.0, // Not available in trade message
+            ask: 0.0, // Not available in trade message
             last: trade.price,
             volume: trade.size,
             timestamp_ns: now_ns(),
-            vix: 0.0,  // Will be updated from VIX feed separately
+            vix: 0.0,       // Will be updated from VIX feed separately
             depeg_pct: 0.0, // Will be calculated separately
         };
 
-        self.packet_tx.send(packet).await
+        self.packet_tx
+            .send(packet)
+            .await
             .context("Failed to send packet")?;
 
         Ok(())
@@ -278,7 +282,9 @@ impl MarketDataFeed {
             depeg_pct: 0.0,
         };
 
-        self.packet_tx.send(packet).await
+        self.packet_tx
+            .send(packet)
+            .await
             .context("Failed to send packet")?;
 
         Ok(())

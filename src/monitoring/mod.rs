@@ -2,11 +2,11 @@
 //!
 //! Prometheus metrics, FINRA audit logging, and alerting.
 
-pub mod metrics;
+pub mod alerts;
 pub mod audit;
 pub mod audit_log;
-pub mod alerts;
+pub mod metrics;
 
-pub use metrics::*;
-pub use audit::*;
 pub use alerts::*;
+pub use audit::*;
+pub use metrics::*;

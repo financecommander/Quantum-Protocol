@@ -2,7 +2,7 @@
 //!
 //! Append-only audit trail with daily rotation.
 
-use crate::engine::{now_ns, AuditRecord};
+use crate::engine::AuditRecord;
 use anyhow::Result;
 use chrono::{DateTime, Local, Utc};
 use std::fs::{File, OpenOptions};
@@ -114,8 +114,7 @@ impl AuditLogger {
             let current_date = Local::now().format("%Y-%m-%d").to_string();
             self.log_dir.join(format!("audit_{}.jsonl", current_date))
         } else {
-            self.log_dir
-                .join(format!("audit_{}.jsonl", *date_guard))
+            self.log_dir.join(format!("audit_{}.jsonl", *date_guard))
         }
     }
 
@@ -137,7 +136,9 @@ impl AuditLogger {
                     // Extract date from filename: audit_YYYY-MM-DD.jsonl
                     if filename.starts_with("audit_") && filename.ends_with(".jsonl") {
                         let date_str = &filename[6..filename.len() - 6]; // Remove "audit_" and ".jsonl"
-                        if let Ok(file_date) = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+                        if let Ok(file_date) =
+                            chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                        {
                             // Use and_hms_opt with proper error handling
                             if let Some(naive_dt) = file_date.and_hms_opt(0, 0, 0) {
                                 let file_datetime = naive_dt.and_utc();
@@ -178,7 +179,7 @@ struct AuditLogEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::AuditEventType;
+    use crate::engine::{now_ns, AuditEventType};
     use tempfile::TempDir;
 
     #[test]

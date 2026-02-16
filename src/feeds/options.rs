@@ -80,7 +80,8 @@ impl OptionChainFeed {
     /// Process an option quote update
     pub async fn handle_quote(&mut self, quote: OptionQuote) -> Result<()> {
         // Update cache
-        self.option_cache.insert(quote.symbol.clone(), quote.clone());
+        self.option_cache
+            .insert(quote.symbol.clone(), quote.clone());
 
         // Send to consumers
         self.quote_tx.send(quote).await?;
@@ -202,18 +203,38 @@ mod tests {
         let otm_threshold = 0.05; // 5% OTM
 
         // Add some puts at different strikes
-        feed.handle_quote(create_test_option("SPY_P420", "SPY", 420.0, OptionType::Put))
-            .await
-            .unwrap();
-        feed.handle_quote(create_test_option("SPY_P430", "SPY", 430.0, OptionType::Put))
-            .await
-            .unwrap();
-        feed.handle_quote(create_test_option("SPY_P440", "SPY", 440.0, OptionType::Put))
-            .await
-            .unwrap();
-        feed.handle_quote(create_test_option("SPY_C460", "SPY", 460.0, OptionType::Call))
-            .await
-            .unwrap();
+        feed.handle_quote(create_test_option(
+            "SPY_P420",
+            "SPY",
+            420.0,
+            OptionType::Put,
+        ))
+        .await
+        .unwrap();
+        feed.handle_quote(create_test_option(
+            "SPY_P430",
+            "SPY",
+            430.0,
+            OptionType::Put,
+        ))
+        .await
+        .unwrap();
+        feed.handle_quote(create_test_option(
+            "SPY_P440",
+            "SPY",
+            440.0,
+            OptionType::Put,
+        ))
+        .await
+        .unwrap();
+        feed.handle_quote(create_test_option(
+            "SPY_C460",
+            "SPY",
+            460.0,
+            OptionType::Call,
+        ))
+        .await
+        .unwrap();
 
         let otm_puts = feed.get_otm_puts("SPY", current_price, otm_threshold);
 
@@ -252,7 +273,7 @@ mod tests {
         // Strikes 25 and 30 should be excluded
         assert_eq!(vix_calls.len(), 1);
         assert_eq!(vix_calls[0].strike, 35.0);
-        
+
         // Verify excluded strikes are not in results
         assert!(!vix_calls.iter().any(|q| q.strike == 25.0));
         assert!(!vix_calls.iter().any(|q| q.strike == 30.0));
@@ -270,9 +291,14 @@ mod tests {
         feed.handle_quote(create_test_option("VIX_C30", "VIX", 30.0, OptionType::Call))
             .await
             .unwrap();
-        feed.handle_quote(create_test_option("VIX_C30_01", "VIX", 30.01, OptionType::Call))
-            .await
-            .unwrap();
+        feed.handle_quote(create_test_option(
+            "VIX_C30_01",
+            "VIX",
+            30.01,
+            OptionType::Call,
+        ))
+        .await
+        .unwrap();
 
         let vix_calls = feed.get_vix_calls(current_vix, strike_offset);
 
@@ -287,15 +313,30 @@ mod tests {
         let mut feed = OptionChainFeed::new(tx);
 
         // Add options for different underlyings
-        feed.handle_quote(create_test_option("SPY_C450", "SPY", 450.0, OptionType::Call))
-            .await
-            .unwrap();
-        feed.handle_quote(create_test_option("SPY_P440", "SPY", 440.0, OptionType::Put))
-            .await
-            .unwrap();
-        feed.handle_quote(create_test_option("QQQ_C380", "QQQ", 380.0, OptionType::Call))
-            .await
-            .unwrap();
+        feed.handle_quote(create_test_option(
+            "SPY_C450",
+            "SPY",
+            450.0,
+            OptionType::Call,
+        ))
+        .await
+        .unwrap();
+        feed.handle_quote(create_test_option(
+            "SPY_P440",
+            "SPY",
+            440.0,
+            OptionType::Put,
+        ))
+        .await
+        .unwrap();
+        feed.handle_quote(create_test_option(
+            "QQQ_C380",
+            "QQQ",
+            380.0,
+            OptionType::Call,
+        ))
+        .await
+        .unwrap();
 
         let spy_chain = feed.get_chain("SPY");
         assert_eq!(spy_chain.len(), 2);

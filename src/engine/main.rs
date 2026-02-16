@@ -26,7 +26,8 @@ async fn main() {
     log::info!("Quantum Protocol Engine v0.1.0 starting...");
 
     // Load configuration
-    let config_path = env::var("QP_CONFIG").unwrap_or_else(|_| "config/quantum_protocol.toml".to_string());
+    let config_path =
+        env::var("QP_CONFIG").unwrap_or_else(|_| "config/quantum_protocol.toml".to_string());
     let config = match load_config(&config_path) {
         Ok(c) => c,
         Err(e) => {

@@ -15,7 +15,6 @@ use prometheus::{
     Encoder, GaugeVec, HistogramVec, IntCounterVec, IntGaugeVec, TextEncoder,
 };
 use std::convert::Infallible;
-use std::sync::Arc;
 use tokio::net::TcpListener;
 
 // ---------------------------------------------------------------------------
@@ -48,11 +47,8 @@ pub struct MetricsCollector {
 impl MetricsCollector {
     /// Create a new metrics collector with Prometheus registration
     pub fn new() -> Result<Self> {
-        let sleeve_pnl = register_gauge_vec!(
-            "quantum_sleeve_pnl",
-            "P&L per trading sleeve",
-            &["sleeve"]
-        )?;
+        let sleeve_pnl =
+            register_gauge_vec!("quantum_sleeve_pnl", "P&L per trading sleeve", &["sleeve"])?;
 
         let tick_latency = register_histogram_vec!(
             "quantum_tick_latency_ns",
@@ -124,7 +120,7 @@ impl MetricsCollector {
         };
         self.trades_total
             .with_label_values(&[sleeve, side_str])
-            .inc_by(qty.abs() as u64);
+            .inc_by(qty.unsigned_abs().into());
     }
 
     /// Update sleeve P&L

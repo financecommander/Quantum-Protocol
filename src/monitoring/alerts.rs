@@ -31,7 +31,12 @@ pub struct Alert {
 
 impl Alert {
     /// Create a new alert
-    pub fn new(severity: Severity, title: impl Into<String>, message: impl Into<String>, source: impl Into<String>) -> Self {
+    pub fn new(
+        severity: Severity,
+        title: impl Into<String>,
+        message: impl Into<String>,
+        source: impl Into<String>,
+    ) -> Self {
         Self {
             severity,
             title: title.into(),
@@ -71,11 +76,7 @@ pub struct SmtpConfig {
 
 impl AlertManager {
     /// Create a new alert manager
-    pub fn new(
-        slack_webhook_url: String,
-        smtp_config: SmtpConfig,
-        cooldown_secs: u64,
-    ) -> Self {
+    pub fn new(slack_webhook_url: String, smtp_config: SmtpConfig, cooldown_secs: u64) -> Self {
         Self {
             slack_webhook_url,
             smtp_config,
@@ -93,9 +94,7 @@ impl AlertManager {
         // Check deduplication
         let key = alert.alert_key();
         if let Some(last_time) = self.last_alert_times.get(&key) {
-            let elapsed = Utc::now()
-                .signed_duration_since(*last_time)
-                .num_seconds();
+            let elapsed = Utc::now().signed_duration_since(*last_time).num_seconds();
             if elapsed < self.cooldown_secs as i64 {
                 log::debug!(
                     "Alert '{}' suppressed due to cooldown ({}s remaining)",
@@ -254,9 +253,7 @@ mod tests {
 
         // Check that the same alert within cooldown would be suppressed
         let last_time = manager.last_alert_times.get(&alert2.alert_key()).unwrap();
-        let elapsed = Utc::now()
-            .signed_duration_since(*last_time)
-            .num_seconds();
+        let elapsed = Utc::now().signed_duration_since(*last_time).num_seconds();
         assert!(elapsed < manager.cooldown_secs as i64);
     }
 
