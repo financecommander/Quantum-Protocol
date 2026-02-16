@@ -107,6 +107,13 @@ impl Default for VolRegimeConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+pub struct PropAccountEntry {
+    pub id: String,
+    #[serde(default = "default_max_position")]
+    pub max_position: f64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct PropScalingConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -114,6 +121,10 @@ pub struct PropScalingConfig {
     pub max_accounts: usize,
     #[serde(default = "default_min_equity")]
     pub min_equity: f64,
+    #[serde(default)]
+    pub master_account_id: String,
+    #[serde(default)]
+    pub prop_accounts: Vec<PropAccountEntry>,
 }
 
 impl Default for PropScalingConfig {
@@ -122,6 +133,8 @@ impl Default for PropScalingConfig {
             enabled: true,
             max_accounts: default_max_accounts(),
             min_equity: default_min_equity(),
+            master_account_id: String::new(),
+            prop_accounts: Vec::new(),
         }
     }
 }
@@ -218,6 +231,10 @@ pub struct FeedsConfig {
     pub heartbeat_interval_ms: u64,
     #[serde(default = "default_reconnect_max_delay_ms")]
     pub reconnect_max_delay_ms: u64,
+    #[serde(default)]
+    pub alpaca_api_key: String,
+    #[serde(default)]
+    pub alpaca_secret_key: String,
 }
 
 impl Default for FeedsConfig {
@@ -228,6 +245,8 @@ impl Default for FeedsConfig {
             symbols: Vec::new(),
             heartbeat_interval_ms: default_heartbeat_interval_ms(),
             reconnect_max_delay_ms: default_reconnect_max_delay_ms(),
+            alpaca_api_key: String::new(),
+            alpaca_secret_key: String::new(),
         }
     }
 }
@@ -642,5 +661,79 @@ api_key = "${QP_TEST_API_KEY}"
         let config: QuantumConfig = toml::from_str(&substituted).unwrap();
         assert_eq!(config.feeds.api_key, "secret123");
         std::env::remove_var("QP_TEST_API_KEY");
+    }
+
+    #[test]
+    fn test_prop_scaling_master_account_and_prop_accounts() {
+        let raw = r#"
+[engine]
+max_position = 1000000.0
+hedge_ratio = 0.8
+
+[sleeves.prop_scaling]
+enabled = true
+max_accounts = 32
+min_equity = 2000.0
+master_account_id = "U12345678"
+prop_accounts = [
+    { id = "PROP_001", max_position = 10000.0 },
+    { id = "PROP_002", max_position = 5000.0 },
+]
+"#;
+        let config: QuantumConfig = toml::from_str(raw).unwrap();
+        assert_eq!(config.sleeves.prop_scaling.master_account_id, "U12345678");
+        assert_eq!(config.sleeves.prop_scaling.prop_accounts.len(), 2);
+        assert_eq!(config.sleeves.prop_scaling.prop_accounts[0].id, "PROP_001");
+        assert_eq!(config.sleeves.prop_scaling.prop_accounts[0].max_position, 10000.0);
+        assert_eq!(config.sleeves.prop_scaling.prop_accounts[1].id, "PROP_002");
+        assert_eq!(config.sleeves.prop_scaling.prop_accounts[1].max_position, 5000.0);
+    }
+
+    #[test]
+    fn test_prop_scaling_defaults_without_new_fields() {
+        let raw = r#"
+[engine]
+max_position = 1000000.0
+hedge_ratio = 0.8
+
+[sleeves.prop_scaling]
+enabled = true
+"#;
+        let config: QuantumConfig = toml::from_str(raw).unwrap();
+        assert_eq!(config.sleeves.prop_scaling.master_account_id, "");
+        assert!(config.sleeves.prop_scaling.prop_accounts.is_empty());
+    }
+
+    #[test]
+    fn test_alpaca_keys_in_feeds() {
+        std::env::set_var("QP_TEST_ALPACA_KEY", "ak_test");
+        std::env::set_var("QP_TEST_ALPACA_SECRET", "sk_test");
+        let raw = r#"
+[engine]
+max_position = 1000000.0
+hedge_ratio = 0.8
+
+[feeds]
+alpaca_api_key = "${QP_TEST_ALPACA_KEY}"
+alpaca_secret_key = "${QP_TEST_ALPACA_SECRET}"
+"#;
+        let substituted = substitute_env_vars(raw);
+        let config: QuantumConfig = toml::from_str(&substituted).unwrap();
+        assert_eq!(config.feeds.alpaca_api_key, "ak_test");
+        assert_eq!(config.feeds.alpaca_secret_key, "sk_test");
+        std::env::remove_var("QP_TEST_ALPACA_KEY");
+        std::env::remove_var("QP_TEST_ALPACA_SECRET");
+    }
+
+    #[test]
+    fn test_alpaca_keys_default_empty() {
+        let raw = r#"
+[engine]
+max_position = 1000000.0
+hedge_ratio = 0.8
+"#;
+        let config: QuantumConfig = toml::from_str(raw).unwrap();
+        assert_eq!(config.feeds.alpaca_api_key, "");
+        assert_eq!(config.feeds.alpaca_secret_key, "");
     }
 }

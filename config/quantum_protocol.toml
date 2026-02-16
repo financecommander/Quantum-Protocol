@@ -27,6 +27,9 @@ threshold_high = 30.0
 enabled = true
 max_accounts = 32
 min_equity = 2000.0
+master_account_id = "${IBKR_MASTER_ACCOUNT}"
+# prop_accounts = [{ id = "PROP_001", max_position = 10000.0 }]
+prop_accounts = []
 
 [sleeves.rwa_crypto]
 enabled = true
@@ -66,6 +69,8 @@ api_key = "${QP_API_KEY}"
 symbols = ["BTC-USD", "ETH-USD", "SPY", "QQQ", "TLT"]
 heartbeat_interval_ms = 1000
 reconnect_max_delay_ms = 60000
+alpaca_api_key = "${ALPACA_API_KEY}"
+alpaca_secret_key = "${ALPACA_SECRET_KEY}"
 
 # ---------------------------------------------------------------------------
 # Alerts
