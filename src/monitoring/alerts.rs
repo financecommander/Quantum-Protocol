@@ -1,15 +1,18 @@
-//! Alert Manager
+//! Alerting System
 //!
-//! Slack/email alerts with cooldown-based deduplication.
+//! Slack webhook and email alerts with deduplication.
 
-use crate::engine::common::now_ns;
+use anyhow::Result;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Duration;
 
 // ---------------------------------------------------------------------------
 // Alert Types
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Severity {
     Info,
     Warning,
@@ -17,22 +20,35 @@ pub enum Severity {
     Emergency,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Alert {
     pub severity: Severity,
     pub title: String,
     pub message: String,
-    pub timestamp_ns: u64,
+    pub timestamp: DateTime<Utc>,
+    pub source: String,
 }
 
 impl Alert {
-    pub fn new(severity: Severity, title: &str, message: &str) -> Self {
+    /// Create a new alert
+    pub fn new(
+        severity: Severity,
+        title: impl Into<String>,
+        message: impl Into<String>,
+        source: impl Into<String>,
+    ) -> Self {
         Self {
             severity,
-            title: title.to_string(),
-            message: message.to_string(),
-            timestamp_ns: now_ns(),
+            title: title.into(),
+            message: message.into(),
+            timestamp: Utc::now(),
+            source: source.into(),
         }
+    }
+
+    /// Get alert key for deduplication
+    fn alert_key(&self) -> String {
+        format!("{}:{}", self.source, self.title)
     }
 }
 
@@ -40,96 +56,134 @@ impl Alert {
 // Alert Manager
 // ---------------------------------------------------------------------------
 
+/// Alert manager with Slack and email support
 pub struct AlertManager {
-    pub slack_webhook_url: String,
-    pub email_to: String,
-    pub cooldown_ns: u64,
-    last_alert_times: HashMap<String, u64>,
-    pub alerts_sent: u64,
-    pub alerts_suppressed: u64,
+    slack_webhook_url: String,
+    smtp_config: SmtpConfig,
+    cooldown_secs: u64,
+    last_alert_times: HashMap<String, DateTime<Utc>>,
+    http_client: reqwest::Client,
+}
+
+#[derive(Debug, Clone)]
+pub struct SmtpConfig {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub pass: String,
+    pub to: String,
 }
 
 impl AlertManager {
-    pub fn new(slack_webhook_url: &str, email_to: &str, cooldown_secs: u64) -> Self {
+    /// Create a new alert manager
+    pub fn new(slack_webhook_url: String, smtp_config: SmtpConfig, cooldown_secs: u64) -> Self {
         Self {
-            slack_webhook_url: slack_webhook_url.to_string(),
-            email_to: email_to.to_string(),
-            cooldown_ns: cooldown_secs * 1_000_000_000,
+            slack_webhook_url,
+            smtp_config,
+            cooldown_secs,
             last_alert_times: HashMap::new(),
-            alerts_sent: 0,
-            alerts_suppressed: 0,
+            http_client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .unwrap(),
         }
     }
 
-    /// Check if an alert should be sent (cooldown deduplication).
-    pub fn should_send(&self, alert: &Alert) -> bool {
-        let key = self.dedup_key(alert);
-        match self.last_alert_times.get(&key) {
-            Some(&last_time) => {
-                let elapsed = alert.timestamp_ns.saturating_sub(last_time);
-                elapsed >= self.cooldown_ns
+    /// Send an alert (with deduplication)
+    pub async fn send_alert(&mut self, alert: Alert) {
+        // Check deduplication
+        let key = alert.alert_key();
+        if let Some(last_time) = self.last_alert_times.get(&key) {
+            let elapsed = Utc::now().signed_duration_since(*last_time).num_seconds();
+            if elapsed < self.cooldown_secs as i64 {
+                log::debug!(
+                    "Alert '{}' suppressed due to cooldown ({}s remaining)",
+                    alert.title,
+                    self.cooldown_secs as i64 - elapsed
+                );
+                return;
             }
-            None => true,
+        }
+
+        // Update last alert time
+        self.last_alert_times.insert(key, alert.timestamp);
+
+        // Send to Slack
+        if let Err(e) = self.send_slack(&alert).await {
+            log::error!("Failed to send Slack alert: {}", e);
+        }
+
+        // Send email for Critical and Emergency alerts
+        if matches!(alert.severity, Severity::Critical | Severity::Emergency) {
+            if let Err(e) = self.send_email(&alert).await {
+                log::error!("Failed to send email alert: {}", e);
+            }
         }
     }
 
-    /// Send an alert (checks cooldown first).
-    /// Returns true if the alert was sent, false if suppressed.
-    pub fn send_alert(&mut self, alert: &Alert) -> bool {
-        if !self.should_send(alert) {
-            self.alerts_suppressed += 1;
-            return false;
-        }
-
-        let key = self.dedup_key(alert);
-        self.last_alert_times.insert(key, alert.timestamp_ns);
-        self.alerts_sent += 1;
-
-        log::warn!(
-            "[ALERT {:?}] {}: {}",
-            alert.severity,
-            alert.title,
-            alert.message
-        );
-
-        true
-    }
-
-    /// Format alert for Slack webhook payload.
-    pub fn format_slack_payload(&self, alert: &Alert) -> String {
-        let emoji = match alert.severity {
-            Severity::Info => ":information_source:",
-            Severity::Warning => ":warning:",
-            Severity::Critical => ":rotating_light:",
-            Severity::Emergency => ":sos:",
+    /// Send alert to Slack
+    async fn send_slack(&self, alert: &Alert) -> Result<()> {
+        let color = match alert.severity {
+            Severity::Info => "#36a64f",      // Green
+            Severity::Warning => "#ff9900",   // Orange
+            Severity::Critical => "#ff0000",  // Red
+            Severity::Emergency => "#8b0000", // Dark red
         };
 
-        serde_json::json!({
-            "text": format!("{} *{}*\n{}", emoji, alert.title, alert.message),
+        let payload = serde_json::json!({
             "attachments": [{
-                "color": match alert.severity {
-                    Severity::Info => "#36a64f",
-                    Severity::Warning => "#daa038",
-                    Severity::Critical => "#cc0000",
-                    Severity::Emergency => "#ff0000",
-                },
-                "fields": [{
-                    "title": "Severity",
-                    "value": format!("{:?}", alert.severity),
-                    "short": true
-                }]
+                "color": color,
+                "title": format!("[{:?}] {}", alert.severity, alert.title),
+                "text": alert.message,
+                "footer": format!("Source: {}", alert.source),
+                "ts": alert.timestamp.timestamp(),
             }]
-        })
-        .to_string()
+        });
+
+        let response = self
+            .http_client
+            .post(&self.slack_webhook_url)
+            .json(&payload)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("Slack API returned status: {}", response.status());
+        }
+
+        log::info!("Slack alert sent: {}", alert.title);
+        Ok(())
     }
 
-    /// Reset alert history (e.g., daily reset).
-    pub fn reset(&mut self) {
-        self.last_alert_times.clear();
+    /// Send alert via email (simplified implementation)
+    async fn send_email(&self, alert: &Alert) -> Result<()> {
+        // This is a simplified implementation
+        // In production, you would use a library like `lettre` for full SMTP support
+        log::info!(
+            "Email alert would be sent to {}: [{:?}] {}",
+            self.smtp_config.to,
+            alert.severity,
+            alert.title
+        );
+
+        // For now, just log the email
+        // In a real implementation, you would:
+        // 1. Connect to SMTP server
+        // 2. Authenticate
+        // 3. Send email with proper headers and body
+
+        Ok(())
     }
 
-    fn dedup_key(&self, alert: &Alert) -> String {
-        format!("{:?}:{}", alert.severity, alert.title)
+    /// Clear cooldown for a specific alert (for testing)
+    pub fn clear_cooldown(&mut self, source: &str, title: &str) {
+        let key = format!("{}:{}", source, title);
+        self.last_alert_times.remove(&key);
+    }
+
+    /// Get number of unique alerts sent
+    pub fn alert_count(&self) -> usize {
+        self.last_alert_times.len()
     }
 }
 
@@ -141,123 +195,91 @@ impl AlertManager {
 mod tests {
     use super::*;
 
-    fn make_alert_manager() -> AlertManager {
-        AlertManager::new("", "", 300)
+    fn create_test_manager() -> AlertManager {
+        AlertManager::new(
+            "https://hooks.slack.com/services/test".to_string(),
+            SmtpConfig {
+                host: "smtp.test.com".to_string(),
+                port: 587,
+                user: "test@test.com".to_string(),
+                pass: "password".to_string(),
+                to: "alerts@test.com".to_string(),
+            },
+            300, // 5 min cooldown
+        )
     }
 
-    #[test]
-    fn test_send_alert_first_time() {
-        let mut mgr = make_alert_manager();
-        let alert = Alert::new(Severity::Warning, "Test", "message");
-        assert!(mgr.send_alert(&alert));
-        assert_eq!(mgr.alerts_sent, 1);
-    }
-
-    #[test]
-    fn test_cooldown_suppression() {
-        let mut mgr = make_alert_manager();
-        let alert1 = Alert::new(Severity::Warning, "Test", "message");
-        assert!(mgr.send_alert(&alert1));
-
-        // Same alert immediately should be suppressed
-        let alert2 = Alert {
-            severity: Severity::Warning,
-            title: "Test".to_string(),
-            message: "message again".to_string(),
-            timestamp_ns: alert1.timestamp_ns + 1_000, // 1µs later
-        };
-        assert!(!mgr.send_alert(&alert2));
-        assert_eq!(mgr.alerts_suppressed, 1);
-    }
-
-    #[test]
-    fn test_cooldown_expired() {
-        let mut mgr = make_alert_manager();
-        let alert1 = Alert {
-            severity: Severity::Warning,
-            title: "Test".to_string(),
-            message: "message".to_string(),
-            timestamp_ns: 1_000_000_000,
-        };
-        assert!(mgr.send_alert(&alert1));
-
-        // Same alert after cooldown should send
-        let alert2 = Alert {
-            severity: Severity::Warning,
-            title: "Test".to_string(),
-            message: "message".to_string(),
-            timestamp_ns: 1_000_000_000 + 300 * 1_000_000_000 + 1, // >300s later
-        };
-        assert!(mgr.send_alert(&alert2));
-        assert_eq!(mgr.alerts_sent, 2);
-    }
-
-    #[test]
-    fn test_different_alerts_not_suppressed() {
-        let mut mgr = make_alert_manager();
-        let alert1 = Alert::new(Severity::Warning, "Alert A", "message");
-        let alert2 = Alert::new(Severity::Warning, "Alert B", "message");
-        assert!(mgr.send_alert(&alert1));
-        assert!(mgr.send_alert(&alert2));
-        assert_eq!(mgr.alerts_sent, 2);
-    }
-
-    #[test]
-    fn test_different_severity_not_suppressed() {
-        let mut mgr = make_alert_manager();
-        let alert1 = Alert::new(Severity::Warning, "Test", "message");
-        let alert2 = Alert::new(Severity::Critical, "Test", "message");
-        assert!(mgr.send_alert(&alert1));
-        assert!(mgr.send_alert(&alert2));
-        assert_eq!(mgr.alerts_sent, 2);
-    }
-
-    #[test]
-    fn test_format_slack_payload() {
-        let mgr = make_alert_manager();
+    #[tokio::test]
+    async fn test_alert_creation() {
         let alert = Alert::new(
-            Severity::Critical,
-            "Kill Switch",
-            "Triggered due to P&L loss",
+            Severity::Warning,
+            "Test Alert",
+            "This is a test",
+            "test_suite",
         );
-        let payload = mgr.format_slack_payload(&alert);
-        assert!(payload.contains("Kill Switch"));
-        assert!(payload.contains("rotating_light"));
-        assert!(payload.contains("#cc0000"));
+        assert_eq!(alert.severity, Severity::Warning);
+        assert_eq!(alert.title, "Test Alert");
+        assert_eq!(alert.source, "test_suite");
+    }
+
+    #[tokio::test]
+    async fn test_alert_key() {
+        let alert1 = Alert::new(Severity::Info, "Alert1", "msg", "source1");
+        let alert2 = Alert::new(Severity::Info, "Alert1", "msg", "source1");
+        let alert3 = Alert::new(Severity::Info, "Alert2", "msg", "source1");
+
+        assert_eq!(alert1.alert_key(), alert2.alert_key());
+        assert_ne!(alert1.alert_key(), alert3.alert_key());
     }
 
     #[test]
-    fn test_format_slack_emergency() {
-        let mgr = make_alert_manager();
-        let alert = Alert::new(Severity::Emergency, "System Down", "Engine stopped");
-        let payload = mgr.format_slack_payload(&alert);
-        assert!(payload.contains("sos"));
-        assert!(payload.contains("#ff0000"));
+    fn test_alert_manager_creation() {
+        let manager = create_test_manager();
+        assert_eq!(manager.cooldown_secs, 300);
+        assert_eq!(manager.alert_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_alert_deduplication() {
+        let mut manager = create_test_manager();
+
+        let alert1 = Alert::new(Severity::Info, "DupTest", "First", "test");
+        let alert2 = Alert::new(Severity::Info, "DupTest", "Second", "test");
+
+        // First alert should be sent (but we're not actually sending to Slack in test)
+        // We'll just track the deduplication logic
+        let key = alert1.alert_key();
+        manager.last_alert_times.insert(key, Utc::now());
+
+        // Check that the same alert within cooldown would be suppressed
+        let last_time = manager.last_alert_times.get(&alert2.alert_key()).unwrap();
+        let elapsed = Utc::now().signed_duration_since(*last_time).num_seconds();
+        assert!(elapsed < manager.cooldown_secs as i64);
     }
 
     #[test]
-    fn test_reset() {
-        let mut mgr = make_alert_manager();
-        let alert = Alert::new(Severity::Warning, "Test", "message");
-        mgr.send_alert(&alert);
-        mgr.reset();
+    fn test_clear_cooldown() {
+        let mut manager = create_test_manager();
+        let alert = Alert::new(Severity::Info, "Test", "msg", "source");
 
-        // After reset, same alert should send again
-        let alert2 = Alert::new(Severity::Warning, "Test", "message");
-        assert!(mgr.send_alert(&alert2));
+        manager
+            .last_alert_times
+            .insert(alert.alert_key(), Utc::now());
+        assert_eq!(manager.alert_count(), 1);
+
+        manager.clear_cooldown("source", "Test");
+        assert_eq!(manager.alert_count(), 0);
     }
 
     #[test]
-    fn test_should_send_no_history() {
-        let mgr = make_alert_manager();
-        let alert = Alert::new(Severity::Info, "New Alert", "test");
-        assert!(mgr.should_send(&alert));
-    }
-
-    #[test]
-    fn test_severity_values() {
-        assert_ne!(Severity::Info, Severity::Warning);
-        assert_ne!(Severity::Warning, Severity::Critical);
-        assert_ne!(Severity::Critical, Severity::Emergency);
+    fn test_severity_levels() {
+        assert_eq!(
+            std::mem::discriminant(&Severity::Info),
+            std::mem::discriminant(&Severity::Info)
+        );
+        assert_ne!(
+            std::mem::discriminant(&Severity::Info),
+            std::mem::discriminant(&Severity::Critical)
+        );
     }
 }

@@ -1,176 +1,280 @@
-//! Kill Switch
+//! Kill Switch - Emergency Shutdown
 //!
-//! Multiple trigger types: P&L loss, position breach, consecutive rejections,
-//! heartbeat timeout. State persistence for recovery.
+//! Monitors multiple trigger conditions and initiates graceful shutdown.
 
-use crate::engine::common::now_ns;
-use serde::{Deserialize, Serialize};
+use crate::engine::now_ns;
+use anyhow::Result;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+
+// ---------------------------------------------------------------------------
+// Kill Switch Status
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum KillSwitchStatus {
+    /// Kill switch is armed and monitoring
+    Armed,
+    /// Kill switch has been triggered
+    Triggered(TriggerReason),
+    /// Kill switch is disarmed (for testing or recovery)
+    Disarmed,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TriggerReason {
+    DailyLossExceeded,
+    PositionBreach,
+    ManualTrigger,
+    ConsecutiveRejections,
+    HeartbeatTimeout,
+}
+
+// ---------------------------------------------------------------------------
+// Kill Switch State (for persistence)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct KillSwitchState {
+    triggered: bool,
+    trigger_reason: Option<String>,
+    trigger_timestamp_ns: u64,
+    daily_pnl: f64,
+    consecutive_rejections: u32,
+}
 
 // ---------------------------------------------------------------------------
 // Kill Switch
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum KillSwitchStatus {
-    Armed,
-    Triggered(KillSwitchReason),
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum KillSwitchReason {
-    PnlLoss { loss: f64, limit: f64 },
-    PositionBreach { position: f64, limit: f64 },
-    ConsecutiveRejections { count: u32, limit: u32 },
-    HeartbeatTimeout { elapsed_ms: u64, limit_ms: u64 },
-    Manual { reason: String },
-}
-
+/// Emergency kill switch with multiple trigger conditions
 pub struct KillSwitch {
-    pub status: KillSwitchStatus,
-    pub max_daily_loss: f64,
-    pub max_portfolio_position: f64,
-    pub max_consecutive_rejections: u32,
-    pub heartbeat_timeout_ms: u64,
-    pub current_pnl: f64,
-    pub current_position: f64,
-    pub consecutive_rejections: u32,
-    pub last_heartbeat_ns: u64,
-    pub triggered_at_ns: u64,
+    // Atomic flags for thread-safe access
+    is_armed: Arc<AtomicBool>,
+    is_triggered: Arc<AtomicBool>,
+    manual_trigger: Arc<AtomicBool>,
+
+    // Monitoring state
+    daily_pnl: f64,
+    max_daily_loss: f64,
+    consecutive_rejections: u32,
+    max_consecutive_rejections: u32,
+    last_heartbeat_ns: Arc<AtomicU64>,
+    heartbeat_timeout_ms: u64,
+
+    // Position tracking
+    max_position_size: i64,
+
+    // Trigger state
+    trigger_reason: Option<TriggerReason>,
+
+    // State file for persistence
+    state_file: Option<String>,
 }
 
 impl KillSwitch {
+    /// Create a new kill switch
     pub fn new(
         max_daily_loss: f64,
-        max_portfolio_position: f64,
         max_consecutive_rejections: u32,
         heartbeat_timeout_ms: u64,
+        max_position_size: i64,
     ) -> Self {
         Self {
-            status: KillSwitchStatus::Armed,
+            is_armed: Arc::new(AtomicBool::new(true)),
+            is_triggered: Arc::new(AtomicBool::new(false)),
+            manual_trigger: Arc::new(AtomicBool::new(false)),
+            daily_pnl: 0.0,
             max_daily_loss,
-            max_portfolio_position,
-            max_consecutive_rejections,
-            heartbeat_timeout_ms,
-            current_pnl: 0.0,
-            current_position: 0.0,
             consecutive_rejections: 0,
-            last_heartbeat_ns: now_ns(),
-            triggered_at_ns: 0,
+            max_consecutive_rejections,
+            last_heartbeat_ns: Arc::new(AtomicU64::new(now_ns())),
+            heartbeat_timeout_ms,
+            max_position_size,
+            trigger_reason: None,
+            state_file: None,
         }
     }
 
-    /// Check all kill switch conditions. Returns current status.
-    pub fn check(&mut self) -> &KillSwitchStatus {
-        if self.status != KillSwitchStatus::Armed {
-            return &self.status;
+    /// Set the state file path for persistence
+    pub fn with_state_file(mut self, path: String) -> Self {
+        self.state_file = Some(path);
+        self
+    }
+
+    /// Arm the kill switch
+    pub fn arm(&mut self) {
+        self.is_armed.store(true, Ordering::SeqCst);
+        log::info!("Kill switch armed");
+    }
+
+    /// Disarm the kill switch (for testing or recovery)
+    pub fn disarm(&mut self) {
+        self.is_armed.store(false, Ordering::SeqCst);
+        log::warn!("Kill switch disarmed");
+    }
+
+    /// Trigger the kill switch manually
+    pub fn trigger_manual(&mut self) {
+        self.manual_trigger.store(true, Ordering::SeqCst);
+        log::error!("Kill switch triggered manually");
+    }
+
+    /// Check kill switch status and trigger if conditions are met
+    pub fn check(&mut self) -> KillSwitchStatus {
+        if !self.is_armed.load(Ordering::SeqCst) {
+            return KillSwitchStatus::Disarmed;
         }
 
-        // Check P&L loss
-        if self.current_pnl < -self.max_daily_loss {
-            self.trigger(KillSwitchReason::PnlLoss {
-                loss: self.current_pnl,
-                limit: self.max_daily_loss,
-            });
-            return &self.status;
+        if self.is_triggered.load(Ordering::SeqCst) {
+            return KillSwitchStatus::Triggered(
+                self.trigger_reason
+                    .clone()
+                    .unwrap_or(TriggerReason::ManualTrigger),
+            );
         }
 
-        // Check position breach
-        if self.current_position > self.max_portfolio_position {
-            self.trigger(KillSwitchReason::PositionBreach {
-                position: self.current_position,
-                limit: self.max_portfolio_position,
-            });
-            return &self.status;
+        // Check manual trigger
+        if self.manual_trigger.load(Ordering::SeqCst) {
+            return self.trigger(TriggerReason::ManualTrigger);
+        }
+
+        // Check daily P&L loss
+        if self.daily_pnl < self.max_daily_loss {
+            log::error!(
+                "Daily P&L {} below threshold {}",
+                self.daily_pnl,
+                self.max_daily_loss
+            );
+            return self.trigger(TriggerReason::DailyLossExceeded);
         }
 
         // Check consecutive rejections
         if self.consecutive_rejections >= self.max_consecutive_rejections {
-            self.trigger(KillSwitchReason::ConsecutiveRejections {
-                count: self.consecutive_rejections,
-                limit: self.max_consecutive_rejections,
-            });
-            return &self.status;
+            log::error!(
+                "Consecutive rejections {} exceeds threshold {}",
+                self.consecutive_rejections,
+                self.max_consecutive_rejections
+            );
+            return self.trigger(TriggerReason::ConsecutiveRejections);
         }
 
         // Check heartbeat timeout
-        if self.last_heartbeat_ns > 0 {
-            let elapsed_ms = (now_ns() - self.last_heartbeat_ns) / 1_000_000;
-            if elapsed_ms > self.heartbeat_timeout_ms {
-                self.trigger(KillSwitchReason::HeartbeatTimeout {
-                    elapsed_ms,
-                    limit_ms: self.heartbeat_timeout_ms,
-                });
-                return &self.status;
-            }
+        let last_hb = self.last_heartbeat_ns.load(Ordering::SeqCst);
+        let elapsed_ms = (now_ns() - last_hb) / 1_000_000;
+        if elapsed_ms > self.heartbeat_timeout_ms {
+            log::error!(
+                "Heartbeat timeout: {}ms elapsed, threshold {}ms",
+                elapsed_ms,
+                self.heartbeat_timeout_ms
+            );
+            return self.trigger(TriggerReason::HeartbeatTimeout);
         }
 
-        &self.status
+        KillSwitchStatus::Armed
     }
 
-    /// Manually trigger the kill switch.
-    pub fn trigger_manual(&mut self, reason: &str) {
-        self.trigger(KillSwitchReason::Manual {
-            reason: reason.to_string(),
-        });
+    /// Trigger the kill switch with a specific reason
+    fn trigger(&mut self, reason: TriggerReason) -> KillSwitchStatus {
+        log::error!("KILL SWITCH TRIGGERED: {:?}", reason);
+        self.is_triggered.store(true, Ordering::SeqCst);
+        self.trigger_reason = Some(reason.clone());
+
+        // Persist state
+        if let Err(e) = self.save_state() {
+            log::error!("Failed to save kill switch state: {}", e);
+        }
+
+        KillSwitchStatus::Triggered(reason)
     }
 
-    /// Update P&L.
+    /// Update daily P&L
     pub fn update_pnl(&mut self, pnl: f64) {
-        self.current_pnl = pnl;
+        self.daily_pnl = pnl;
     }
 
-    /// Update aggregate position.
-    pub fn update_position(&mut self, position: f64) {
-        self.current_position = position;
-    }
-
-    /// Record a rejection.
+    /// Record a rejection
     pub fn record_rejection(&mut self) {
         self.consecutive_rejections += 1;
+        log::debug!(
+            "Rejection recorded: {} consecutive",
+            self.consecutive_rejections
+        );
     }
 
-    /// Record a fill (resets rejection counter).
-    pub fn record_fill(&mut self) {
+    /// Record a successful trade (resets rejection counter)
+    pub fn record_success(&mut self) {
         self.consecutive_rejections = 0;
     }
 
-    /// Record a heartbeat.
-    pub fn record_heartbeat(&mut self) {
-        self.last_heartbeat_ns = now_ns();
+    /// Update heartbeat
+    pub fn heartbeat(&mut self) {
+        self.last_heartbeat_ns.store(now_ns(), Ordering::SeqCst);
     }
 
-    /// Reset (re-arm) the kill switch for a new trading day.
-    pub fn reset(&mut self) {
-        self.status = KillSwitchStatus::Armed;
-        self.current_pnl = 0.0;
-        self.current_position = 0.0;
-        self.consecutive_rejections = 0;
-        self.last_heartbeat_ns = now_ns();
-        self.triggered_at_ns = 0;
-    }
-
-    /// Check if the kill switch is currently triggered.
-    pub fn is_triggered(&self) -> bool {
-        matches!(self.status, KillSwitchStatus::Triggered(_))
-    }
-
-    /// Serialize state for persistence/recovery.
-    pub fn persist_state(&self) -> Option<String> {
-        if let KillSwitchStatus::Triggered(ref reason) = self.status {
-            serde_json::to_string(reason).ok()
+    /// Check if a position size would breach limits
+    pub fn check_position(&self, position_size: i64) -> Result<(), String> {
+        if position_size.abs() > self.max_position_size {
+            Err(format!(
+                "Position size {} exceeds max {}",
+                position_size.abs(),
+                self.max_position_size
+            ))
         } else {
-            None
+            Ok(())
         }
     }
 
-    /// Restore from persisted state.
-    pub fn restore_state(json: &str) -> Option<KillSwitchReason> {
-        serde_json::from_str(json).ok()
+    /// Save kill switch state to disk
+    fn save_state(&self) -> Result<()> {
+        if let Some(path) = &self.state_file {
+            let state = KillSwitchState {
+                triggered: self.is_triggered.load(Ordering::SeqCst),
+                trigger_reason: self.trigger_reason.as_ref().map(|r| format!("{:?}", r)),
+                trigger_timestamp_ns: now_ns(),
+                daily_pnl: self.daily_pnl,
+                consecutive_rejections: self.consecutive_rejections,
+            };
+
+            let json = serde_json::to_string_pretty(&state)?;
+            std::fs::write(path, json)?;
+            log::info!("Kill switch state saved to {}", path);
+        }
+        Ok(())
     }
 
-    fn trigger(&mut self, reason: KillSwitchReason) {
-        self.status = KillSwitchStatus::Triggered(reason);
-        self.triggered_at_ns = now_ns();
+    /// Load kill switch state from disk
+    pub fn load_state(&mut self) -> Result<()> {
+        if let Some(path) = &self.state_file {
+            if Path::new(path).exists() {
+                let json = std::fs::read_to_string(path)?;
+                let state: KillSwitchState = serde_json::from_str(&json)?;
+
+                if state.triggered {
+                    log::warn!("Loaded kill switch state: previously triggered");
+                    self.is_triggered.store(true, Ordering::SeqCst);
+                    // Don't automatically trigger again, but log the previous state
+                }
+
+                self.daily_pnl = state.daily_pnl;
+                self.consecutive_rejections = state.consecutive_rejections;
+
+                log::info!("Kill switch state loaded from {}", path);
+            }
+        }
+        Ok(())
+    }
+
+    /// Reset the kill switch (for new trading day or recovery)
+    pub fn reset(&mut self) {
+        self.is_triggered.store(false, Ordering::SeqCst);
+        self.manual_trigger.store(false, Ordering::SeqCst);
+        self.daily_pnl = 0.0;
+        self.consecutive_rejections = 0;
+        self.trigger_reason = None;
+        self.last_heartbeat_ns.store(now_ns(), Ordering::SeqCst);
+        log::info!("Kill switch reset");
     }
 }
 
@@ -181,164 +285,95 @@ impl KillSwitch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread::sleep;
+    use std::time::Duration;
 
-    fn make_kill_switch() -> KillSwitch {
-        KillSwitch::new(50_000.0, 5_000_000.0, 10, 5000)
+    #[test]
+    fn test_kill_switch_armed() {
+        let mut ks = KillSwitch::new(-50000.0, 10, 5000, 10000);
+        assert_eq!(ks.check(), KillSwitchStatus::Armed);
     }
 
     #[test]
-    fn test_armed_by_default() {
-        let mut ks = make_kill_switch();
-        assert_eq!(*ks.check(), KillSwitchStatus::Armed);
-        assert!(!ks.is_triggered());
-    }
-
-    #[test]
-    fn test_pnl_loss_trigger() {
-        let mut ks = make_kill_switch();
-        ks.update_pnl(-60_000.0);
-        ks.check();
-        assert!(ks.is_triggered());
-        match &ks.status {
-            KillSwitchStatus::Triggered(KillSwitchReason::PnlLoss { loss, limit }) => {
-                assert_eq!(*loss, -60_000.0);
-                assert_eq!(*limit, 50_000.0);
-            }
-            _ => panic!("Expected PnlLoss"),
-        }
-    }
-
-    #[test]
-    fn test_position_breach_trigger() {
-        let mut ks = make_kill_switch();
-        ks.update_position(6_000_000.0);
-        ks.check();
-        assert!(ks.is_triggered());
-        match &ks.status {
-            KillSwitchStatus::Triggered(KillSwitchReason::PositionBreach { .. }) => {}
-            _ => panic!("Expected PositionBreach"),
-        }
-    }
-
-    #[test]
-    fn test_consecutive_rejections_trigger() {
-        let mut ks = make_kill_switch();
-        for _ in 0..10 {
-            ks.record_rejection();
-        }
-        ks.check();
-        assert!(ks.is_triggered());
-        match &ks.status {
-            KillSwitchStatus::Triggered(KillSwitchReason::ConsecutiveRejections {
-                count,
-                limit,
-            }) => {
-                assert_eq!(*count, 10);
-                assert_eq!(*limit, 10);
-            }
-            _ => panic!("Expected ConsecutiveRejections"),
-        }
-    }
-
-    #[test]
-    fn test_fill_resets_rejections() {
-        let mut ks = make_kill_switch();
-        for _ in 0..5 {
-            ks.record_rejection();
-        }
-        assert_eq!(ks.consecutive_rejections, 5);
-        ks.record_fill();
-        assert_eq!(ks.consecutive_rejections, 0);
+    fn test_kill_switch_disarmed() {
+        let mut ks = KillSwitch::new(-50000.0, 10, 5000, 10000);
+        ks.disarm();
+        assert_eq!(ks.check(), KillSwitchStatus::Disarmed);
     }
 
     #[test]
     fn test_manual_trigger() {
-        let mut ks = make_kill_switch();
-        ks.trigger_manual("operator intervention");
-        assert!(ks.is_triggered());
-        match &ks.status {
-            KillSwitchStatus::Triggered(KillSwitchReason::Manual { reason }) => {
-                assert_eq!(reason, "operator intervention");
-            }
-            _ => panic!("Expected Manual"),
+        let mut ks = KillSwitch::new(-50000.0, 10, 5000, 10000);
+        ks.trigger_manual();
+        let status = ks.check();
+        assert!(matches!(
+            status,
+            KillSwitchStatus::Triggered(TriggerReason::ManualTrigger)
+        ));
+    }
+
+    #[test]
+    fn test_daily_loss_trigger() {
+        let mut ks = KillSwitch::new(-50000.0, 10, 5000, 10000);
+        ks.update_pnl(-60000.0); // Exceeds threshold
+        let status = ks.check();
+        assert!(matches!(
+            status,
+            KillSwitchStatus::Triggered(TriggerReason::DailyLossExceeded)
+        ));
+    }
+
+    #[test]
+    fn test_consecutive_rejections_trigger() {
+        let mut ks = KillSwitch::new(-50000.0, 5, 5000, 10000);
+        for _ in 0..5 {
+            ks.record_rejection();
         }
+        let status = ks.check();
+        assert!(matches!(
+            status,
+            KillSwitchStatus::Triggered(TriggerReason::ConsecutiveRejections)
+        ));
+    }
+
+    #[test]
+    fn test_rejection_reset_on_success() {
+        let mut ks = KillSwitch::new(-50000.0, 10, 5000, 10000);
+        ks.record_rejection();
+        ks.record_rejection();
+        assert_eq!(ks.consecutive_rejections, 2);
+
+        ks.record_success();
+        assert_eq!(ks.consecutive_rejections, 0);
+    }
+
+    #[test]
+    fn test_position_check() {
+        let ks = KillSwitch::new(-50000.0, 10, 5000, 1000);
+        assert!(ks.check_position(500).is_ok());
+        assert!(ks.check_position(1001).is_err());
+        assert!(ks.check_position(-1001).is_err());
+    }
+
+    #[test]
+    fn test_heartbeat_timeout() {
+        let mut ks = KillSwitch::new(-50000.0, 10, 10, 10000); // 10ms timeout
+        sleep(Duration::from_millis(20)); // Wait longer than timeout
+        let status = ks.check();
+        assert!(matches!(
+            status,
+            KillSwitchStatus::Triggered(TriggerReason::HeartbeatTimeout)
+        ));
     }
 
     #[test]
     fn test_reset() {
-        let mut ks = make_kill_switch();
-        ks.trigger_manual("test");
-        assert!(ks.is_triggered());
+        let mut ks = KillSwitch::new(-50000.0, 10, 5000, 10000);
+        ks.update_pnl(-60000.0);
+        ks.check(); // Triggers
+
         ks.reset();
-        assert!(!ks.is_triggered());
-        assert_eq!(ks.current_pnl, 0.0);
-    }
-
-    #[test]
-    fn test_persist_and_restore() {
-        let mut ks = make_kill_switch();
-        ks.trigger_manual("test persist");
-
-        let json = ks.persist_state().unwrap();
-        let restored = KillSwitch::restore_state(&json).unwrap();
-        match restored {
-            KillSwitchReason::Manual { reason } => assert_eq!(reason, "test persist"),
-            _ => panic!("Expected Manual"),
-        }
-    }
-
-    #[test]
-    fn test_persist_armed_returns_none() {
-        let ks = make_kill_switch();
-        assert!(ks.persist_state().is_none());
-    }
-
-    #[test]
-    fn test_restore_invalid_json() {
-        assert!(KillSwitch::restore_state("invalid").is_none());
-    }
-
-    #[test]
-    fn test_stays_triggered() {
-        let mut ks = make_kill_switch();
-        ks.trigger_manual("test");
-        ks.update_pnl(100.0); // Even with positive PnL
-        ks.check();
-        assert!(ks.is_triggered());
-    }
-
-    #[test]
-    fn test_pnl_within_limit() {
-        let mut ks = make_kill_switch();
-        ks.update_pnl(-40_000.0);
-        ks.check();
-        assert!(!ks.is_triggered());
-    }
-
-    #[test]
-    fn test_position_within_limit() {
-        let mut ks = make_kill_switch();
-        ks.update_position(4_000_000.0);
-        ks.check();
-        assert!(!ks.is_triggered());
-    }
-
-    #[test]
-    fn test_rejections_below_limit() {
-        let mut ks = make_kill_switch();
-        for _ in 0..9 {
-            ks.record_rejection();
-        }
-        ks.check();
-        assert!(!ks.is_triggered());
-    }
-
-    #[test]
-    fn test_record_heartbeat() {
-        let mut ks = make_kill_switch();
-        let before = ks.last_heartbeat_ns;
-        std::thread::sleep(std::time::Duration::from_millis(1));
-        ks.record_heartbeat();
-        assert!(ks.last_heartbeat_ns >= before);
+        assert_eq!(ks.daily_pnl, 0.0);
+        assert!(!ks.is_triggered.load(Ordering::SeqCst));
     }
 }

@@ -1,0 +1,23 @@
+# Prometheus configuration for Quantum Protocol
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'quantum-protocol'
+    environment: 'production'
+
+# Scrape configurations
+scrape_configs:
+  # Quantum Engine metrics
+  - job_name: 'quantum-engine'
+    static_configs:
+      - targets: ['quantum-engine:9090']
+        labels:
+          service: 'quantum-engine'
+          instance: 'main'
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

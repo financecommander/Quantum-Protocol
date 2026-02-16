@@ -1,186 +1,293 @@
-//! WebSocket Market Data Feed
+//! Market Data Feed
 //!
-//! Connects to a WebSocket endpoint for real-time market data,
-//! with exponential backoff reconnection and heartbeat monitoring.
+//! WebSocket feed for real-time market data with automatic reconnection.
 
-use crate::engine::common::{hash_symbol, now_ns, MarketPacket};
+use crate::engine::{hash_symbol, now_ns, MarketPacket};
+use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message;
+use tokio::time::sleep;
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 // ---------------------------------------------------------------------------
-// Configuration
+// Market Data Message Types
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug)]
-pub struct MarketDataFeedConfig {
-    pub ws_url: String,
-    pub api_key: String,
-    pub symbols: Vec<String>,
-    pub heartbeat_interval_ms: u64,
-    pub reconnect_max_delay_ms: u64,
+#[allow(dead_code)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "T")]
+enum MarketDataMessage {
+    #[serde(rename = "t")]
+    Trade(TradeMessage),
+    #[serde(rename = "q")]
+    Quote(QuoteMessage),
+    #[serde(rename = "b")]
+    Bar(BarMessage),
 }
 
-impl Default for MarketDataFeedConfig {
-    fn default() -> Self {
-        Self {
-            ws_url: "wss://feed.example.com/v1/market".to_string(),
-            api_key: String::new(),
-            symbols: Vec::new(),
-            heartbeat_interval_ms: 1000,
-            reconnect_max_delay_ms: 60_000,
-        }
-    }
+#[derive(Debug, Deserialize, Serialize)]
+struct TradeMessage {
+    #[serde(rename = "S")]
+    symbol: String,
+    #[serde(rename = "p")]
+    price: f64,
+    #[serde(rename = "s")]
+    size: u64,
+    #[serde(rename = "t")]
+    timestamp: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct QuoteMessage {
+    #[serde(rename = "S")]
+    symbol: String,
+    #[serde(rename = "bp")]
+    bid_price: f64,
+    #[serde(rename = "ap")]
+    ask_price: f64,
+    #[serde(rename = "t")]
+    timestamp: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize, Serialize)]
+struct BarMessage {
+    #[serde(rename = "S")]
+    symbol: String,
+    #[serde(rename = "c")]
+    close: f64,
+    #[serde(rename = "v")]
+    volume: u64,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct SubscribeRequest {
+    action: String,
+    trades: Option<Vec<String>>,
+    quotes: Option<Vec<String>>,
+    bars: Option<Vec<String>>,
 }
 
 // ---------------------------------------------------------------------------
-// Feed
+// Market Data Feed
 // ---------------------------------------------------------------------------
 
+/// WebSocket market data feed with automatic reconnection
 pub struct MarketDataFeed {
-    pub config: MarketDataFeedConfig,
-    pub last_heartbeat_ns: u64,
-    pub reconnect_attempts: u32,
-    pub connected: bool,
+    ws_url: String,
+    api_key: String,
+    symbols: Vec<String>,
+    heartbeat_interval_ms: u64,
+    max_reconnect_delay_secs: u64,
+    packet_tx: mpsc::Sender<MarketPacket>,
 }
 
 impl MarketDataFeed {
-    pub fn new(config: MarketDataFeedConfig) -> Self {
+    /// Create a new market data feed
+    pub fn new(
+        ws_url: String,
+        api_key: String,
+        symbols: Vec<String>,
+        heartbeat_interval_ms: u64,
+        max_reconnect_delay_secs: u64,
+        packet_tx: mpsc::Sender<MarketPacket>,
+    ) -> Self {
         Self {
-            config,
-            last_heartbeat_ns: 0,
-            reconnect_attempts: 0,
-            connected: false,
+            ws_url,
+            api_key,
+            symbols,
+            heartbeat_interval_ms,
+            max_reconnect_delay_secs,
+            packet_tx,
         }
     }
 
-    /// Calculate reconnection delay with exponential backoff.
-    /// Sequence: 1s, 2s, 4s, 8s, ... up to max.
-    pub fn reconnect_delay_ms(&self) -> u64 {
-        let base = 1000u64;
-        let delay = base.saturating_mul(1u64 << self.reconnect_attempts.min(6));
-        delay.min(self.config.reconnect_max_delay_ms)
-    }
+    /// Connect to the WebSocket feed
+    pub async fn connect(&mut self) -> Result<()> {
+        let mut reconnect_delay = 1u64;
 
-    /// Parse a JSON market data message into a `MarketPacket`.
-    pub fn parse_json_message(json: &str) -> Option<MarketPacket> {
-        let v: serde_json::Value = serde_json::from_str(json).ok()?;
-        let obj = v.as_object()?;
-
-        let symbol = obj.get("symbol")?.as_str()?;
-        let symbol_id = hash_symbol(symbol);
-
-        Some(MarketPacket {
-            symbol_id,
-            bid: obj.get("bid")?.as_f64()?,
-            ask: obj.get("ask")?.as_f64()?,
-            last: obj.get("last")?.as_f64()?,
-            volume: obj.get("volume")?.as_u64()?,
-            timestamp_ns: obj
-                .get("timestamp_ns")
-                .and_then(|v| v.as_u64())
-                .unwrap_or_else(now_ns),
-            vix: obj.get("vix").and_then(|v| v.as_f64()).unwrap_or(0.0),
-            depeg_pct: obj.get("depeg_pct").and_then(|v| v.as_f64()).unwrap_or(0.0),
-        })
-    }
-
-    /// Check if heartbeat is stale (no data for longer than interval).
-    pub fn is_heartbeat_stale(&self) -> bool {
-        if self.last_heartbeat_ns == 0 {
-            return false;
-        }
-        let elapsed_ms = (now_ns() - self.last_heartbeat_ns) / 1_000_000;
-        elapsed_ms > self.config.heartbeat_interval_ms * 3
-    }
-
-    /// Reset reconnection state after successful connection.
-    pub fn on_connected(&mut self) {
-        self.connected = true;
-        self.reconnect_attempts = 0;
-        self.last_heartbeat_ns = now_ns();
-    }
-
-    /// Mark disconnected and increment reconnect counter.
-    pub fn on_disconnected(&mut self) {
-        self.connected = false;
-        self.reconnect_attempts = self.reconnect_attempts.saturating_add(1);
-    }
-
-    /// Record a heartbeat from incoming data.
-    pub fn record_heartbeat(&mut self) {
-        self.last_heartbeat_ns = now_ns();
-    }
-
-    /// Connect to the WebSocket feed and send parsed packets through the channel.
-    pub async fn run(
-        &mut self,
-        tx: mpsc::Sender<MarketPacket>,
-        mut shutdown: tokio::sync::broadcast::Receiver<()>,
-    ) {
         loop {
-            match tokio_tungstenite::connect_async(&self.config.ws_url).await {
-                Ok((ws_stream, _)) => {
-                    self.on_connected();
-                    log::info!("Market data feed connected to {}", self.config.ws_url);
+            log::info!("Connecting to market data feed: {}", self.ws_url);
 
-                    let (mut _write, mut read) = ws_stream.split();
-
-                    loop {
-                        tokio::select! {
-                            msg = read.next() => {
-                                match msg {
-                                    Some(Ok(Message::Text(text))) => {
-                                        self.record_heartbeat();
-                                        if let Some(packet) = Self::parse_json_message(&text) {
-                                            if tx.send(packet).await.is_err() {
-                                                log::error!("Market data channel closed");
-                                                return;
-                                            }
-                                        }
-                                    }
-                                    Some(Ok(Message::Ping(data))) => {
-                                        self.record_heartbeat();
-                                        let _ = _write.send(Message::Pong(data)).await;
-                                    }
-                                    Some(Err(e)) => {
-                                        log::warn!("WebSocket error: {e}");
-                                        break;
-                                    }
-                                    None => {
-                                        log::warn!("WebSocket stream ended");
-                                        break;
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            _ = shutdown.recv() => {
-                                log::info!("Market data feed shutting down");
-                                return;
-                            }
-                        }
-                    }
+            match self.connect_once().await {
+                Ok(_) => {
+                    log::info!("Market data feed disconnected normally");
+                    reconnect_delay = 1; // Reset delay on successful connection
                 }
                 Err(e) => {
-                    log::warn!("WebSocket connect failed: {e}");
+                    log::error!("Market data feed error: {}", e);
                 }
             }
 
-            self.on_disconnected();
-            let delay = self.reconnect_delay_ms();
-            log::info!(
-                "Reconnecting in {delay}ms (attempt {})",
-                self.reconnect_attempts
-            );
+            // Exponential backoff: 1s, 2s, 4s, 8s, ..., max 60s
+            let delay = reconnect_delay.min(self.max_reconnect_delay_secs);
+            log::info!("Reconnecting in {} seconds...", delay);
+            sleep(Duration::from_secs(delay)).await;
 
+            reconnect_delay = (reconnect_delay * 2).min(self.max_reconnect_delay_secs);
+        }
+    }
+
+    /// Single connection attempt
+    async fn connect_once(&mut self) -> Result<()> {
+        let (ws_stream, _) = connect_async(&self.ws_url)
+            .await
+            .context("Failed to connect to WebSocket")?;
+
+        log::info!("WebSocket connected");
+
+        let (mut write, mut read) = ws_stream.split();
+
+        // Authenticate (if needed, depends on the WebSocket API)
+        let auth_msg = serde_json::json!({
+            "action": "auth",
+            "key": self.api_key,
+        });
+        write
+            .send(Message::Text(auth_msg.to_string()))
+            .await
+            .context("Failed to send auth message")?;
+
+        // Subscribe to symbols
+        let subscribe_msg = serde_json::json!({
+            "action": "subscribe",
+            "trades": self.symbols,
+            "quotes": self.symbols,
+        });
+        write
+            .send(Message::Text(subscribe_msg.to_string()))
+            .await
+            .context("Failed to send subscribe message")?;
+
+        log::info!("Subscribed to symbols: {:?}", self.symbols);
+
+        // Heartbeat monitoring
+        let heartbeat_interval = Duration::from_millis(self.heartbeat_interval_ms);
+        let mut last_message = tokio::time::Instant::now();
+
+        loop {
             tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_millis(delay)) => {}
-                _ = shutdown.recv() => {
-                    log::info!("Market data feed shutting down during reconnect");
-                    return;
+                msg = read.next() => {
+                    match msg {
+                        Some(Ok(Message::Text(text))) => {
+                            last_message = tokio::time::Instant::now();
+                            if let Err(e) = self.handle_message(&text).await {
+                                log::warn!("Failed to handle message: {}", e);
+                            }
+                        }
+                        Some(Ok(Message::Ping(_))) => {
+                            last_message = tokio::time::Instant::now();
+                        }
+                        Some(Ok(Message::Close(_))) => {
+                            log::info!("WebSocket closed by server");
+                            break;
+                        }
+                        Some(Err(e)) => {
+                            log::error!("WebSocket error: {}", e);
+                            break;
+                        }
+                        None => {
+                            log::warn!("WebSocket stream ended");
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                _ = sleep(heartbeat_interval) => {
+                    if last_message.elapsed() > heartbeat_interval * 2 {
+                        log::warn!("Heartbeat timeout, reconnecting...");
+                        break;
+                    }
                 }
             }
         }
+
+        Ok(())
+    }
+
+    /// Handle incoming message
+    async fn handle_message(&mut self, text: &str) -> Result<()> {
+        // Try to parse as array of messages (common for market data feeds)
+        if let Ok(messages) = serde_json::from_str::<Vec<serde_json::Value>>(text) {
+            for msg in messages {
+                self.process_message(&msg).await?;
+            }
+        } else if let Ok(msg) = serde_json::from_str::<serde_json::Value>(text) {
+            self.process_message(&msg).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Process a single message
+    async fn process_message(&mut self, msg: &serde_json::Value) -> Result<()> {
+        // Extract message type
+        let msg_type = msg.get("T").and_then(|t| t.as_str());
+
+        match msg_type {
+            Some("t") => {
+                // Trade message
+                if let Ok(trade) = serde_json::from_value::<TradeMessage>(msg.clone()) {
+                    self.send_packet_from_trade(&trade).await?;
+                }
+            }
+            Some("q") => {
+                // Quote message
+                if let Ok(quote) = serde_json::from_value::<QuoteMessage>(msg.clone()) {
+                    self.send_packet_from_quote(&quote).await?;
+                }
+            }
+            _ => {
+                // Ignore other message types (control messages, etc.)
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Convert trade to MarketPacket and send
+    async fn send_packet_from_trade(&mut self, trade: &TradeMessage) -> Result<()> {
+        let packet = MarketPacket {
+            symbol_id: hash_symbol(&trade.symbol),
+            bid: 0.0, // Not available in trade message
+            ask: 0.0, // Not available in trade message
+            last: trade.price,
+            volume: trade.size,
+            timestamp_ns: now_ns(),
+            vix: 0.0,       // Will be updated from VIX feed separately
+            depeg_pct: 0.0, // Will be calculated separately
+        };
+
+        self.packet_tx
+            .send(packet)
+            .await
+            .context("Failed to send packet")?;
+
+        Ok(())
+    }
+
+    /// Convert quote to MarketPacket and send
+    async fn send_packet_from_quote(&mut self, quote: &QuoteMessage) -> Result<()> {
+        let packet = MarketPacket {
+            symbol_id: hash_symbol(&quote.symbol),
+            bid: quote.bid_price,
+            ask: quote.ask_price,
+            last: (quote.bid_price + quote.ask_price) / 2.0,
+            volume: 0,
+            timestamp_ns: now_ns(),
+            vix: 0.0,
+            depeg_pct: 0.0,
+        };
+
+        self.packet_tx
+            .send(packet)
+            .await
+            .context("Failed to send packet")?;
+
+        Ok(())
     }
 }
 
@@ -193,101 +300,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_json_message_valid() {
-        let json = r#"{"symbol":"BTC-USD","bid":50000.0,"ask":50100.0,"last":50050.0,"volume":1000,"timestamp_ns":123456789,"vix":18.0,"depeg_pct":0.0}"#;
-        let packet = MarketDataFeed::parse_json_message(json).unwrap();
-        assert_eq!(packet.symbol_id, hash_symbol("BTC-USD"));
-        assert_eq!(packet.bid, 50000.0);
-        assert_eq!(packet.ask, 50100.0);
-        assert_eq!(packet.last, 50050.0);
-        assert_eq!(packet.volume, 1000);
-        assert_eq!(packet.vix, 18.0);
+    fn test_hash_symbol() {
+        let spy_id = hash_symbol("SPY");
+        let qqq_id = hash_symbol("QQQ");
+        assert_ne!(spy_id, qqq_id);
+        assert_eq!(spy_id, hash_symbol("SPY")); // Consistent
     }
 
     #[test]
-    fn test_parse_json_message_missing_optional() {
-        let json = r#"{"symbol":"ETH-USD","bid":3000.0,"ask":3010.0,"last":3005.0,"volume":500}"#;
-        let packet = MarketDataFeed::parse_json_message(json).unwrap();
-        assert_eq!(packet.symbol_id, hash_symbol("ETH-USD"));
-        assert_eq!(packet.vix, 0.0);
-        assert_eq!(packet.depeg_pct, 0.0);
+    fn test_parse_trade_message() {
+        let json = r#"{"T":"t","S":"SPY","p":450.25,"s":100,"t":"2024-01-01T00:00:00Z"}"#;
+        let trade: Result<TradeMessage, _> = serde_json::from_str(json);
+        assert!(trade.is_ok());
+        let trade = trade.unwrap();
+        assert_eq!(trade.symbol, "SPY");
+        assert_eq!(trade.price, 450.25);
     }
 
     #[test]
-    fn test_parse_json_message_invalid() {
-        assert!(MarketDataFeed::parse_json_message("not json").is_none());
-        assert!(MarketDataFeed::parse_json_message("{}").is_none());
-    }
-
-    #[test]
-    fn test_parse_json_message_missing_required() {
-        let json = r#"{"symbol":"BTC-USD","bid":50000.0}"#;
-        assert!(MarketDataFeed::parse_json_message(json).is_none());
-    }
-
-    #[test]
-    fn test_reconnect_delay_exponential_backoff() {
-        let mut feed = MarketDataFeed::new(MarketDataFeedConfig::default());
-        feed.reconnect_attempts = 0;
-        assert_eq!(feed.reconnect_delay_ms(), 1000);
-
-        feed.reconnect_attempts = 1;
-        assert_eq!(feed.reconnect_delay_ms(), 2000);
-
-        feed.reconnect_attempts = 2;
-        assert_eq!(feed.reconnect_delay_ms(), 4000);
-
-        feed.reconnect_attempts = 3;
-        assert_eq!(feed.reconnect_delay_ms(), 8000);
-    }
-
-    #[test]
-    fn test_reconnect_delay_max_cap() {
-        let mut feed = MarketDataFeed::new(MarketDataFeedConfig::default());
-        feed.reconnect_attempts = 10;
-        assert!(feed.reconnect_delay_ms() <= feed.config.reconnect_max_delay_ms);
-    }
-
-    #[test]
-    fn test_on_connected_resets_state() {
-        let mut feed = MarketDataFeed::new(MarketDataFeedConfig::default());
-        feed.reconnect_attempts = 5;
-        feed.connected = false;
-        feed.on_connected();
-        assert!(feed.connected);
-        assert_eq!(feed.reconnect_attempts, 0);
-        assert!(feed.last_heartbeat_ns > 0);
-    }
-
-    #[test]
-    fn test_on_disconnected() {
-        let mut feed = MarketDataFeed::new(MarketDataFeedConfig::default());
-        feed.connected = true;
-        feed.reconnect_attempts = 2;
-        feed.on_disconnected();
-        assert!(!feed.connected);
-        assert_eq!(feed.reconnect_attempts, 3);
-    }
-
-    #[test]
-    fn test_heartbeat_stale_fresh() {
-        let mut feed = MarketDataFeed::new(MarketDataFeedConfig::default());
-        feed.last_heartbeat_ns = 0;
-        assert!(!feed.is_heartbeat_stale());
-    }
-
-    #[test]
-    fn test_heartbeat_stale_recent() {
-        let mut feed = MarketDataFeed::new(MarketDataFeedConfig::default());
-        feed.record_heartbeat();
-        assert!(!feed.is_heartbeat_stale());
-    }
-
-    #[test]
-    fn test_record_heartbeat() {
-        let mut feed = MarketDataFeed::new(MarketDataFeedConfig::default());
-        assert_eq!(feed.last_heartbeat_ns, 0);
-        feed.record_heartbeat();
-        assert!(feed.last_heartbeat_ns > 0);
+    fn test_parse_quote_message() {
+        let json = r#"{"T":"q","S":"SPY","bp":450.00,"ap":450.50,"t":"2024-01-01T00:00:00Z"}"#;
+        let quote: Result<QuoteMessage, _> = serde_json::from_str(json);
+        assert!(quote.is_ok());
+        let quote = quote.unwrap();
+        assert_eq!(quote.symbol, "SPY");
+        assert_eq!(quote.bid_price, 450.00);
+        assert_eq!(quote.ask_price, 450.50);
     }
 }
