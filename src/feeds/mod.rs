@@ -4,4 +4,4 @@
 
 pub mod execution;
 pub mod market_data;
-pub mod options_chain;
+pub mod options;
