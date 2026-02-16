@@ -1,0 +1,42 @@
+[Unit]
+Description=Quantum Protocol HFT Engine
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quantum
+Group=quantum
+WorkingDirectory=/opt/quantum-protocol
+
+# Environment
+EnvironmentFile=/opt/quantum-protocol/.env
+Environment="RUST_LOG=info"
+
+# Binary path
+ExecStart=/opt/quantum-protocol/quantum-engine
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/quantum-protocol /var/tmp
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=quantum-engine
+
+[Install]
+WantedBy=multi-user.target

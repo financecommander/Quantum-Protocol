@@ -1,77 +1,119 @@
 # Quantum Protocol HFT Engine Configuration
-# ============================================
-# Environment variable substitution: use ${ENV_VAR} syntax
-# Hot reload: changes to this file are automatically applied
+# Production-ready TOML configuration with environment variable substitution
 
 [engine]
+# UDP socket address for market data ingestion
 udp_addr = "0.0.0.0:9999"
-max_position = 1000000.0
-hedge_ratio = 0.8
-circuit_breaker_enabled = true
-heartbeat_max_lag_us = 100
+
+# Port for Prometheus metrics HTTP endpoint
+metrics_port = 9090
+
+# Graceful shutdown timeout in seconds
+graceful_shutdown_timeout_secs = 30
 
 # ---------------------------------------------------------------------------
-# Trading Sleeves
+# Trading Sleeves Configuration
 # ---------------------------------------------------------------------------
 
 [sleeves.treasury_basis]
+# Sleeve 1: Treasury Basis Arbitrage
 enabled = true
-weight = 0.125
+hedge_ratio = 0.8
+max_position = 1000000.0
 
 [sleeves.vol_regime]
+# Sleeve 2: Volatility Regime Classification
 enabled = true
 threshold_low = 15.0
 threshold_high = 30.0
 
 [sleeves.prop_scaling]
+# Sleeve 3: Prop Scaling (Master-Satellite)
 enabled = true
-max_accounts = 32
-min_equity = 2000.0
+master_account_id = 1
+satellite_account_ids = [2, 3, 4, 5]
 
 [sleeves.rwa_crypto]
+# Sleeve 4: RWA Crypto HFT
 enabled = true
-min_spread_bps = 5.0
+depeg_threshold = 5.0
 
 [sleeves.tail_hedging]
+# Sleeve 5: Tail Hedging (VIX calls, OTM puts)
 enabled = true
-vix_critical_threshold = 45.0
+vix_call_strike_offset = 10.0
+put_strike_offset = 5.0
 
 # ---------------------------------------------------------------------------
-# Risk Management
+# Risk Management Configuration
 # ---------------------------------------------------------------------------
 
 [risk]
-max_position_per_symbol = 100000.0
-max_portfolio_position = 5000000.0
-max_daily_loss = 50000.0
-max_consecutive_rejections = 10
-heartbeat_timeout_ms = 5000
+# Maximum position size per symbol (absolute value)
+max_position_size = 10000
+
+# Maximum notional exposure across all positions
+max_notional = 5000000.0
+
+# Maximum daily loss (negative value) before kill switch triggers
+max_daily_loss = -50000.0
+
+# Number of consecutive rejections before kill switch triggers
+kill_switch_consecutive_rejections = 10
+
+# Heartbeat timeout in milliseconds before kill switch triggers
+kill_switch_heartbeat_timeout_ms = 5000
 
 # ---------------------------------------------------------------------------
-# Monitoring
+# Monitoring Configuration
 # ---------------------------------------------------------------------------
 
 [monitoring]
-metrics_port = 9090
-audit_log_dir = "/var/log/quantum"
-audit_retention_days = 2555  # ~7 years (FINRA 3110)
+# Directory for audit logs (FINRA 3110 compliance)
+audit_log_dir = "/var/log/quantum-protocol"
+
+# Audit log retention in days (7 years = 2555 days)
+audit_retention_days = 2555
+
+# Enable Prometheus metrics collection
+metrics_enabled = true
 
 # ---------------------------------------------------------------------------
-# Data Feeds
+# Data Feeds Configuration
 # ---------------------------------------------------------------------------
 
 [feeds]
-ws_url = "wss://feed.example.com/v1/market"
-api_key = "${QP_API_KEY}"
-symbols = ["BTC-USD", "ETH-USD", "SPY", "QQQ", "TLT"]
-heartbeat_interval_ms = 1000
-reconnect_max_delay_ms = 60000
+# WebSocket URL for market data (supports ${ENV_VAR} substitution)
+market_data_ws_url = "${ALPACA_WS_URL}"
+
+# API key for market data authentication
+market_data_api_key = "${ALPACA_API_KEY}"
+
+# Symbols to subscribe to
+symbols = ["SPY", "QQQ", "UVXY", "TLT", "GLD", "UST", "LUNA"]
+
+# Heartbeat interval in milliseconds for connection health check
+heartbeat_interval_ms = 30000
+
+# Maximum reconnection delay in seconds (exponential backoff cap)
+reconnect_max_delay_secs = 60
 
 # ---------------------------------------------------------------------------
-# Alerts
+# Alerting Configuration
 # ---------------------------------------------------------------------------
 
 [alerts]
-slack_webhook_url = "${QP_SLACK_WEBHOOK}"
-email_to = "${QP_ALERT_EMAIL}"
-cooldown_secs = 300
+# Slack webhook URL for alerts (supports ${ENV_VAR} substitution)
+slack_webhook_url = "${SLACK_WEBHOOK_URL}"
+
+# SMTP configuration for email alerts
+smtp_host = "${SMTP_HOST}"
+smtp_port = 587
+smtp_user = "${SMTP_USER}"
+smtp_pass = "${SMTP_PASS}"
+
+# Email recipient for alerts
+alert_email_to = "${ALERT_EMAIL_TO}"
+
+# Alert cooldown period in seconds (prevent spam)
+alert_cooldown_secs = 300
