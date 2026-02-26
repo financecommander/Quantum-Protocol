@@ -3,5 +3,5 @@
 //! Metrics, audit trail, and alerting.
 
 pub mod alerts;
-pub mod audit_log;
+pub mod audit;
 pub mod metrics;
