@@ -1,0 +1,149 @@
+# Quantum Protocol HFT Engine — Production Configuration Template
+# =================================================================
+# Copy this file to config/quantum_protocol.toml and fill in the values.
+#
+# Environment variable substitution: use ${ENV_VAR} syntax for secrets.
+# Hot reload: changes to this file are automatically applied at runtime.
+#
+# All durations are in the unit indicated by the field suffix
+# (_ms = milliseconds, _us = microseconds, _secs = seconds).
+
+# ---------------------------------------------------------------------------
+# Engine Core
+# ---------------------------------------------------------------------------
+[engine]
+# UDP address the engine listens on for market-data ticks.
+# Production recommendation: bind to a specific internal IP if possible.
+udp_addr = "0.0.0.0:9999"
+
+# Maximum net position (in USD notional) the engine may hold across all
+# sleeves. Set according to your risk appetite and capital allocation.
+max_position = 1000000.0
+
+# Delta-hedge ratio applied to new positions (0.0, 1.0].
+# 1.0 = fully hedged; 0.8 is a common production default.
+hedge_ratio = 0.8
+
+# When true, the circuit breaker will halt trading if anomalous conditions
+# are detected (e.g., latency spikes, rapid P&L drawdown).
+circuit_breaker_enabled = true
+
+# Maximum tolerable heartbeat lag in microseconds before the engine
+# considers the data feed stale. p99 latency SLO is < 120 µs.
+heartbeat_max_lag_us = 100
+
+# ---------------------------------------------------------------------------
+# Trading Sleeves
+# ---------------------------------------------------------------------------
+
+[sleeves.treasury_basis]
+# Enable the Treasury basis-trade sleeve.
+enabled = true
+# Portfolio weight allocated to this sleeve (0.0–1.0).
+weight = 0.125
+
+[sleeves.vol_regime]
+# Enable the volatility-regime sleeve.
+enabled = true
+# VIX level below which the regime is considered "low vol".
+threshold_low = 15.0
+# VIX level above which the regime is considered "high vol".
+threshold_high = 30.0
+
+[sleeves.prop_scaling]
+# Enable the proprietary-account scaling sleeve.
+enabled = true
+# Maximum number of prop accounts the engine may manage.
+max_accounts = 32
+# Minimum equity (USD) required per prop account to trade.
+min_equity = 2000.0
+# IBKR master account ID — use an env var so the secret is not in the file.
+master_account_id = "${IBKR_MASTER_ACCOUNT}"
+# List of prop sub-accounts. Uncomment and populate as needed.
+# prop_accounts = [
+#     { id = "{{PROP_ACCOUNT_1}}", max_position = 10000.0 },
+#     { id = "{{PROP_ACCOUNT_2}}", max_position = 5000.0 },
+# ]
+prop_accounts = []
+
+[sleeves.rwa_crypto]
+# Enable the RWA / crypto HFT sleeve.
+enabled = true
+# Minimum spread in basis points to enter a trade.
+min_spread_bps = 5.0
+
+[sleeves.tail_hedging]
+# Enable the tail-hedging sleeve.
+enabled = true
+# VIX level above which the engine enters crisis / tail-hedge mode.
+vix_critical_threshold = 45.0
+
+# ---------------------------------------------------------------------------
+# Risk Management
+# ---------------------------------------------------------------------------
+[risk]
+# Maximum position (USD notional) allowed per individual symbol.
+max_position_per_symbol = 100000.0
+
+# Maximum aggregate portfolio position (USD notional).
+max_portfolio_position = 5000000.0
+
+# Maximum daily P&L loss (USD) before the kill switch activates.
+# Adjust to your fund's risk parameters.
+max_daily_loss = 50000.0
+
+# Number of consecutive order rejections before the kill switch fires.
+max_consecutive_rejections = 10
+
+# If no heartbeat is received within this window (ms), the kill switch
+# triggers and all positions are flattened.
+heartbeat_timeout_ms = 5000
+
+# ---------------------------------------------------------------------------
+# Monitoring
+# ---------------------------------------------------------------------------
+[monitoring]
+# Port on which Prometheus-compatible /metrics endpoint is served.
+metrics_port = 9090
+
+# Directory for FINRA 3110 compliant audit logs (JSON Lines, daily rotation).
+audit_log_dir = "/var/log/quantum"
+
+# Audit log retention in days (~7 years for FINRA 3110 compliance).
+audit_retention_days = 2555
+
+# ---------------------------------------------------------------------------
+# Data Feeds
+# ---------------------------------------------------------------------------
+[feeds]
+# WebSocket URL for the primary market-data feed.
+ws_url = "wss://feed.example.com/v1/market"
+
+# API key for the primary market-data feed.
+api_key = "${QP_API_KEY}"
+
+# Symbols to subscribe to. Add/remove as needed for your strategy.
+symbols = ["BTC-USD", "ETH-USD", "SPY", "QQQ", "TLT"]
+
+# How often (ms) the feed client sends keep-alive heartbeats.
+heartbeat_interval_ms = 1000
+
+# Maximum back-off delay (ms) between reconnection attempts.
+reconnect_max_delay_ms = 60000
+
+# Alpaca API credentials (used for equities execution).
+alpaca_api_key = "${ALPACA_API_KEY}"
+alpaca_secret_key = "${ALPACA_SECRET_KEY}"
+
+# ---------------------------------------------------------------------------
+# Alerts
+# ---------------------------------------------------------------------------
+[alerts]
+# Slack incoming-webhook URL for all alert severities.
+slack_webhook_url = "${QP_SLACK_WEBHOOK}"
+
+# Email address for Critical / Emergency alerts only.
+email_to = "${QP_ALERT_EMAIL}"
+
+# Minimum seconds between duplicate alerts (dedup cooldown).
+cooldown_secs = 300
