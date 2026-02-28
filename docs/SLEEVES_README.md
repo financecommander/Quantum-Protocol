@@ -162,9 +162,8 @@ Audit records are WORM and forwarded to Splunk.
 
 ## License
 
-Proprietary - YCAL LLC
+Proprietary - Calculus Holdings LLC
 
 ## Contact
 
-- Technical: Yconic AI
-- Strategy: Calculus Holdings
+- Calculus Holdings LLC

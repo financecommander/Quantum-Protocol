@@ -56,6 +56,19 @@ from typing import Optional
 logger = logging.getLogger("matrix.strategies.sleeve1")
 
 
+def treasury_basis_signal(bid: float, ask: float, last: float, hedge_ratio: float = 0.8) -> float:
+    """
+    Direct port of Rust sleeve_treasury_basis().
+    Returns signal in [-1.0, 1.0].
+
+    Formula: (spread - fair_value * 0.001).clamp(-1.0, 1.0)
+    where spread = ask - bid, fair_value = last * hedge_ratio.
+    """
+    spread = ask - bid
+    fair_value = last * hedge_ratio
+    return max(-1.0, min(1.0, spread - fair_value * 0.001))
+
+
 class YieldRegime(Enum):
     NORMAL = "normal"           # 2s10s > 50bps, curve upward-sloping → roll-down works
     FLAT = "flat"               # 2s10s 20-50bps, reduced opportunity

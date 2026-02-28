@@ -14,6 +14,21 @@ from typing import Optional
 logger = logging.getLogger("matrix.risk.crisis")
 
 
+def evaluate_crisis(vix: float, depeg_pct: float = 0.0) -> str:
+    """
+    Direct port of Rust evaluate_crisis().
+    Returns "SmartBunker", "SurgicalSniper", or "Normal".
+
+    SmartBunker takes precedence: VIX > 45 is checked before depeg.
+    """
+    if vix > 45.0:
+        return "SmartBunker"
+    elif depeg_pct > 5.0:
+        return "SurgicalSniper"
+    else:
+        return "Normal"
+
+
 class CrisisLevel(Enum):
     NORMAL = 0
     ELEVATED = 1

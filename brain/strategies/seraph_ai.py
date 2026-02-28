@@ -330,15 +330,22 @@ class SeraphAI:
 
     def is_rebalance_due(self, now: Optional[datetime] = None) -> bool:
         """Check if quarterly rebalance is due."""
-        now = now or datetime.utcnow()
+        from datetime import timezone
+        now = now or datetime.now(timezone.utc)
         if self._last_rebalance is None:
             return True
+        # Normalize both to aware for comparison
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        if self._last_rebalance.tzinfo is None:
+            self._last_rebalance = self._last_rebalance.replace(tzinfo=timezone.utc)
         days = (now - self._last_rebalance).days
         return days >= self.config.rebalance_frequency_days
 
     def mark_rebalanced(self):
         """Record that rebalancing occurred."""
-        self._last_rebalance = datetime.utcnow()
+        from datetime import timezone
+        self._last_rebalance = datetime.now(timezone.utc)
 
     def get_status(self) -> dict:
         """Dashboard data."""

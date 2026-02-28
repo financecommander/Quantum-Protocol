@@ -52,6 +52,7 @@ class MarketState:
     es_price: float  # E-mini S&P
     zn_price: float  # 10-year Treasury futures
     zf_price: float  # 5-year Treasury futures
+    depeg_pct: float = 0.0  # Stablecoin depeg percentage (for SurgicalSniper)
 
 
 @dataclass

@@ -20,6 +20,20 @@ from typing import Optional
 logger = logging.getLogger("matrix.risk.regime")
 
 
+def vol_regime_signal(vix: float, low: float = 15.0, high: float = 30.0) -> float:
+    """
+    Direct port of Rust sleeve_vol_regime().
+    Returns -1.0 (risk on), 0.0 (neutral), or 1.0 (risk off).
+
+    Boundary: vix == low -> neutral (not < low). vix == high -> neutral (not > high).
+    """
+    if vix < low:
+        return -1.0
+    elif vix > high:
+        return 1.0
+    return 0.0
+
+
 class MarketRegime(Enum):
     GROWTH = "growth"           # Low vol, trending up → favor Prop Scaling
     NEUTRAL = "neutral"         # Normal conditions → balanced allocation
