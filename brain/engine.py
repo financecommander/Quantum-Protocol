@@ -41,6 +41,7 @@ class QuantumEngine:
         self._ticks_processed = 0
         self._start_time: Optional[float] = None
         self._last_tick_time: Optional[float] = None
+        self._last_market = None
 
         # Core components (lazy init)
         self.orchestrator = None
@@ -122,6 +123,7 @@ class QuantumEngine:
     async def _process_tick(self) -> dict:
         """Process a single tick. Returns target positions."""
         market = await self.feed.get_market_state()
+        self._last_market = market
 
         # Run orchestrator
         positions = self.orchestrator.tick(market)
@@ -160,6 +162,49 @@ class QuantumEngine:
     def get_state(self) -> dict:
         """Full engine state for dashboards."""
         orch = self.orchestrator
+
+        # SERAPH AI regime data
+        seraph = {}
+        if orch and orch._seraph and orch._seraph.state:
+            s = orch._seraph.state
+            seraph = {
+                "regime": s.regime.value,
+                "confidence": round(s.confidence, 2),
+                "days_in_regime": s.days_in_regime,
+                "previous_regime": s.previous_regime.value if s.previous_regime else None,
+                "vix": round(s.signals.vix, 2),
+                "adx": round(s.signals.adx, 1),
+                "spx_20d_return": round(s.signals.spx_20d_return, 4),
+            }
+
+        # Latest market snapshot
+        market = {}
+        if hasattr(self, "_last_market") and self._last_market:
+            m = self._last_market
+            market = {
+                "vix": m.vix,
+                "spx": m.spx,
+                "tnx": m.tnx,
+                "dxy": m.dxy,
+                "depeg_pct": m.depeg_pct,
+                "timestamp": m.timestamp.isoformat(),
+            }
+
+        # Permission vector biases
+        permission_vector = {}
+        if orch and orch._current_vector:
+            pv = orch._current_vector
+            permission_vector = {
+                "regime": pv.regime,
+                "sleeve_biases": {
+                    1: pv.get_sleeve_bias(1),
+                    2: pv.get_sleeve_bias(2),
+                    3: pv.get_sleeve_bias(3),
+                    5: pv.get_sleeve_bias(5),
+                },
+                "requires_human_approval": pv.requires_human_approval,
+            }
+
         return {
             "running": self._running,
             "ticks_processed": self._ticks_processed,
@@ -172,6 +217,7 @@ class QuantumEngine:
                     "sleeve_name": s.sleeve_name,
                     "signal": s.signal,
                     "confidence": s.confidence,
+                    "instruments": s.instruments,
                     "rationale": s.rationale,
                 }
                 for s in (orch.signals if orch else [])
@@ -183,6 +229,11 @@ class QuantumEngine:
                 "convexity_shield": orch.allocation.convexity_shield,
                 "cash": orch.allocation.cash,
             } if orch else {},
+            "seraph": seraph,
+            "market": market,
+            "permission_vector": permission_vector,
+            "kill_switch": orch.is_killed if orch else False,
+            "human_approval_pending": orch._human_approval_pending if orch else False,
             "audit_summary": self.audit.get_compliance_summary() if self.audit else {},
         }
 

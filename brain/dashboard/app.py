@@ -22,6 +22,8 @@ import os
 # Add parent to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from dashboard.state import get_portfolio_state, get_sleeve_allocations, is_live
+
 st.set_page_config(
     page_title="Matrix Protocol™",
     page_icon="🧬",
@@ -29,44 +31,18 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ─── Shared State (simulated — replace with live IBKR feed) ────
-
-def get_portfolio_state():
-    """Simulated portfolio state. v1.5: live from IBKR."""
-    return {
-        "portfolio_value": 50_000.0,
-        "daily_pnl": 342.50,
-        "daily_pnl_pct": 0.69,
-        "total_pnl": 2_847.30,
-        "total_pnl_pct": 5.69,
-        "cash": 10_000.0,
-        "regime": "Growth",
-        "crisis_level": "Normal",
-        "vix": 14.8,
-        "spx": 5_842.0,
-        "timestamp": datetime.utcnow(),
-        "kill_switch": False,
-        "human_approval_pending": False,
-    }
-
-
-def get_sleeve_allocations():
-    return {
-        "Sleeve 1: Treasury Yield": {"target": 0.10, "actual": 0.10, "pnl": 87.50, "status": "HOLD"},
-        "Sleeve 2: Compression & Curve": {"target": 0.15, "actual": 0.14, "pnl": -42.00, "status": "FLATTENER"},
-        "Sleeve 3: Prop Scaling": {"target": 0.45, "actual": 0.46, "pnl": 285.00, "status": "3 EVAL / 2 SCALING"},
-        "Sleeve 4: RWA (deferred)": {"target": 0.00, "actual": 0.00, "pnl": 0.0, "status": "v1.5"},
-        "Sleeve 5: Convexity Shield": {"target": 0.10, "actual": 0.10, "pnl": 12.00, "status": "ACCUMULATE"},
-        "Cash Reserve": {"target": 0.20, "actual": 0.20, "pnl": 0.0, "status": "—"},
-    }
-
-
 # ─── Sidebar ────────────────────────────────────────────────────
 
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/matrix.png", width=60)
     st.title("MATRIX PROTOCOL™")
     st.caption("v1.0 — Brain Layer Dashboard")
+
+    if is_live():
+        st.success("🟢 Engine Connected")
+    else:
+        st.info("⚪ Simulated Data")
+
     st.divider()
 
     state = get_portfolio_state()
@@ -89,6 +65,8 @@ with st.sidebar:
     st.divider()
     st.caption(f"Last update: {state['timestamp'].strftime('%H:%M:%S UTC')}")
     if st.button("🔄 Refresh"):
+        from dashboard.state import invalidate_cache
+        invalidate_cache()
         st.rerun()
 
 

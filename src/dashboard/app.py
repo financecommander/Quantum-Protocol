@@ -2,16 +2,19 @@
 Quantum Protocol - Layer 2 Platform (Retail AI Dashboard)
 
 FastAPI application providing CTA-exempt dashboards with coarsened signals,
-heatmaps, latency metrics, and compliance views. Communicates with the
-Rust engine via shared memory config blocks.
+heatmaps, latency metrics, and compliance views.
+
+When a QuantumEngine is injected via set_engine(), endpoints pull live data.
+Without an engine, endpoints serve simulated data (preserves standalone testing).
 
 Endpoints:
-  GET  /dashboard      — Coarsened market context (no Buy/Sell signals)
-  GET  /heatmaps       — Volatility heatmap data
-  GET  /latency        — Engine latency metrics
-  GET  /compliance     — Compliance / audit log summary
-  POST /update_config  — Update shared config (hedge ratio, thresholds, etc.)
-  GET  /health         — Health check
+  GET  /dashboard       — Coarsened market context (no Buy/Sell signals)
+  GET  /heatmaps        — Volatility heatmap data
+  GET  /latency         — Engine latency metrics
+  GET  /compliance      — Compliance / audit log summary
+  POST /update_config   — Update shared config (hedge ratio, thresholds, etc.)
+  GET  /health          — Health check
+  GET  /internal/state  — Full engine state (internal use by Streamlit dashboard)
 """
 
 from fastapi import FastAPI, HTTPException
@@ -23,12 +26,30 @@ import os
 
 app = FastAPI(
     title="Quantum Protocol Platform",
-    version="0.1.0",
+    version="0.2.0",
     description="CTA-Exempt Retail AI Dashboard for Quantum Protocol",
 )
 
 # ---------------------------------------------------------------------------
-# In-memory shared config (simulates shared memory config block with Rust)
+# Engine injection — when set, endpoints pull live data
+# ---------------------------------------------------------------------------
+
+_engine = None
+
+
+def set_engine(engine):
+    """Inject a running QuantumEngine. Endpoints will pull live data."""
+    global _engine
+    _engine = engine
+
+
+def get_engine():
+    """Get the injected engine (or None)."""
+    return _engine
+
+
+# ---------------------------------------------------------------------------
+# In-memory shared config (fallback when no engine is connected)
 # ---------------------------------------------------------------------------
 
 _shared_config = {
@@ -42,7 +63,7 @@ _shared_config = {
 }
 
 # ---------------------------------------------------------------------------
-# In-memory engine metrics (simulates reading from engine shared memory)
+# In-memory engine metrics (fallback when no engine is connected)
 # ---------------------------------------------------------------------------
 
 _engine_metrics = {
@@ -108,20 +129,40 @@ class ComplianceResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _get_vol_regime() -> str:
-    """Classify current vol regime based on a simulated VIX."""
+def _get_engine_state() -> Optional[dict]:
+    """Get live engine state, or None if no engine is connected."""
+    if _engine is None:
+        return None
+    try:
+        return _engine.get_state()
+    except Exception:
+        return None
+
+
+def _get_vol_regime(vix: Optional[float] = None) -> str:
+    """Classify current vol regime."""
     low = _shared_config["vol_regime_threshold_low"]
     high = _shared_config["vol_regime_threshold_high"]
-    # In production, this reads from shared memory with the engine
-    simulated_vix = 20.0  # placeholder
-    if simulated_vix < low:
+
+    if vix is None:
+        # Try live engine
+        state = _get_engine_state()
+        if state and state.get("market", {}).get("vix") is not None:
+            vix = state["market"]["vix"]
+        else:
+            vix = 20.0  # fallback placeholder
+
+    if vix < low:
         return "Low (Risk-On)"
-    elif simulated_vix > high:
+    elif vix > high:
         return "High (Risk-Off)"
     return "Neutral"
 
 
 def _get_uptime() -> float:
+    state = _get_engine_state()
+    if state is not None:
+        return state.get("uptime_seconds", 0.0)
     return round(time.time() - _start_time, 2)
 
 
@@ -133,6 +174,14 @@ def _get_uptime() -> float:
 @app.get("/health")
 async def health():
     """Health check endpoint."""
+    state = _get_engine_state()
+    if state is not None:
+        return {
+            "status": "ok",
+            "engine": "connected",
+            "uptime_seconds": state.get("uptime_seconds", 0.0),
+            "ticks_processed": state.get("ticks_processed", 0),
+        }
     return {"status": "ok", "uptime_seconds": _get_uptime()}
 
 
@@ -142,6 +191,17 @@ async def dashboard():
     CTA-Exempt dashboard: coarsened market context.
     Does NOT provide Buy/Sell signals to retail users.
     """
+    state = _get_engine_state()
+    if state is not None:
+        vix = state.get("market", {}).get("vix")
+        return DashboardResponse(
+            market_context="Coarsened institutional signal — no direct execution",
+            crisis_state=state.get("crisis_level", "Normal"),
+            vol_regime=_get_vol_regime(vix),
+            ticks_processed=state.get("ticks_processed", 0),
+            uptime_seconds=state.get("uptime_seconds", 0.0),
+        )
+
     return DashboardResponse(
         market_context="Coarsened institutional signal — no direct execution",
         crisis_state=_engine_metrics["crisis_state"],
@@ -175,6 +235,15 @@ async def heatmaps():
 @app.get("/latency", response_model=LatencyResponse)
 async def latency():
     """Engine latency metrics. Target: p99 < 120µs."""
+    state = _get_engine_state()
+    if state is not None:
+        return LatencyResponse(
+            p99_latency_us=_engine_metrics.get("p99_latency_us", 0.0),
+            median_latency_us=_engine_metrics.get("median_latency_us", 0.0),
+            ticks_processed=state.get("ticks_processed", 0),
+            target_p99_us=120.0,
+        )
+
     return LatencyResponse(
         p99_latency_us=_engine_metrics["p99_latency_us"],
         median_latency_us=_engine_metrics["median_latency_us"],
@@ -186,6 +255,17 @@ async def latency():
 @app.get("/compliance", response_model=ComplianceResponse)
 async def compliance():
     """Compliance summary for FINRA 3110 audit."""
+    state = _get_engine_state()
+    if state is not None:
+        audit = state.get("audit_summary", {})
+        return ComplianceResponse(
+            total_audit_records=audit.get("total_entries", 0),
+            crisis_events=audit.get("risk_events", 0),
+            last_crisis_state=state.get("crisis_level", "Normal"),
+            finra_3110_compliant=audit.get("finra_3110_compliant", True),
+            worm_storage_active=audit.get("worm_storage", True),
+        )
+
     crisis_count = sum(1 for r in _audit_log if r.get("event_type") == "CrisisProtocol")
     return ComplianceResponse(
         total_audit_records=len(_audit_log),
@@ -196,11 +276,27 @@ async def compliance():
     )
 
 
+@app.get("/internal/state")
+async def internal_state():
+    """
+    Full engine state for internal dashboards (Streamlit).
+    NOT CTA-exempt — contains full signal detail.
+    Returns 503 if no engine is connected.
+    """
+    state = _get_engine_state()
+    if state is None:
+        raise HTTPException(
+            status_code=503,
+            detail="No engine connected. Start the QuantumEngine and call set_engine().",
+        )
+    return state
+
+
 @app.post("/update_config")
 async def update_config(config: ConfigUpdate):
     """
     Update shared config block. In production, this writes to shared memory
-    that the Rust engine reads on the next tick.
+    that the engine reads on the next tick.
     """
     updates = config.model_dump(exclude_none=True)
     if not updates:

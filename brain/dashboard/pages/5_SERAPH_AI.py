@@ -4,18 +4,37 @@ import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import random
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from dashboard.state import get_seraph_state, get_state, is_live
 
 st.title("🧠 SERAPH AI™ Regime Monitor")
 
 # ─── Current Regime ─────────────────────────────────────────────
 
+seraph = get_seraph_state()
+engine_state = get_state()
+
 st.subheader("Current Regime Classification")
 
+regime = seraph.get("regime", "growth").upper()
+confidence = seraph.get("confidence", 0.87)
+days_in = seraph.get("days_in_regime", 14)
+# Estimate next rebalance: 90 - days_in_regime (quarterly)
+next_rebal = max(0, 90 - days_in)
+
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Active Regime", "GROWTH", help="Based on VIX + SPX trend analysis")
-c2.metric("Confidence", "87%")
-c3.metric("Duration", "14 days")
-c4.metric("Next Rebalance", "76 days")
+c1.metric("Active Regime", regime, help="Based on VIX + SPX trend analysis")
+c2.metric("Confidence", f"{confidence:.0%}")
+c3.metric("Duration", f"{days_in} days")
+c4.metric("Next Rebalance", f"{next_rebal} days")
+
+if is_live():
+    vix = seraph.get("vix", 0)
+    adx = seraph.get("adx", 0)
+    spx_ret = seraph.get("spx_20d_return", 0)
+    st.caption(f"🟢 Live | VIX: {vix:.1f} | ADX: {adx:.0f} | SPX 20d Return: {spx_ret:+.2%}")
 
 # Regime indicator
 regimes = {
@@ -26,7 +45,13 @@ regimes = {
     "Crisis": {"color": "#9C27B0", "desc": "Emergency — Prop/Curve blocked, max hedge"},
 }
 
-current = "Growth"
+# Map engine regime names to display names
+regime_display_map = {
+    "GROWTH": "Growth", "COMPRESSION": "Compression",
+    "VOLATILE": "Transition", "CRISIS": "Crisis",
+}
+current = regime_display_map.get(regime, "Growth")
+
 st.markdown("---")
 cols = st.columns(5)
 for col, (name, info) in zip(cols, regimes.items()):
@@ -36,6 +61,23 @@ for col, (name, info) in zip(cols, regimes.items()):
     else:
         col.markdown(f"○ {name}")
         col.caption(info["desc"])
+
+# ─── Current Allocation (live) ──────────────────────────────────
+
+alloc = engine_state.get("allocation", {})
+if alloc:
+    st.divider()
+    st.subheader("Current Allocation (Regime-Adjusted)")
+    acols = st.columns(5)
+    alloc_labels = [
+        ("Treasury", alloc.get("treasury_yield", 0.10)),
+        ("Curve", alloc.get("compression_curve", 0.15)),
+        ("Prop", alloc.get("prop_scaling", 0.45)),
+        ("Hedge", alloc.get("convexity_shield", 0.10)),
+        ("Cash", alloc.get("cash", 0.20)),
+    ]
+    for col, (label, val) in zip(acols, alloc_labels):
+        col.metric(label, f"{val:.0%}")
 
 # ─── Permission Vector Map ──────────────────────────────────────
 
@@ -52,9 +94,9 @@ regime_data = {
 
 sleeves = ["Treasury", "Curve", "Prop", "RWA", "Tail"]
 fig = go.Figure()
-for regime, biases in regime_data.items():
+for reg_name, biases in regime_data.items():
     fig.add_trace(go.Bar(
-        name=regime,
+        name=reg_name,
         x=sleeves,
         y=[biases[s] for s in sleeves],
         opacity=0.85,

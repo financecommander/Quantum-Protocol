@@ -4,18 +4,28 @@ import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import random
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from dashboard.state import get_state, get_portfolio_state, get_permission_vector
 
 st.title("🛡️ Risk Monitor")
+
+# ─── Live state ────────────────────────────────────────────────
+
+engine_state = get_state()
+portfolio = get_portfolio_state()
+pv = get_permission_vector()
 
 # ─── Kill Switch Status ─────────────────────────────────────────
 
 st.subheader("Kill Switch & Circuit Breakers")
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Kill Switch", "INACTIVE")
-c2.metric("Crisis Level", "Normal")
-c3.metric("Daily Loss", "-0.12%", help="Limit: 2.0%")
-c4.metric("Heartbeat", "OK (2s ago)", help="Timeout: 65 min")
+c1.metric("Kill Switch", "ACTIVE 🚨" if portfolio["kill_switch"] else "INACTIVE")
+c2.metric("Crisis Level", portfolio["crisis_level"])
+c3.metric("Daily Loss", f"{portfolio['daily_pnl_pct']:+.2f}%", help="Limit: 2.0%")
+c4.metric("Heartbeat", "OK" if engine_state.get("running") else "OFFLINE", help="Timeout: 65 min")
 
 # SHIELD gauges
 st.divider()
@@ -25,7 +35,7 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown("**Daily Loss Limit**")
-    daily_loss = 0.12
+    daily_loss = abs(portfolio["daily_pnl_pct"])
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=daily_loss,
@@ -33,7 +43,7 @@ with col1:
         title={"text": "Daily Loss %"},
         gauge={
             "axis": {"range": [0, 2.5]},
-            "bar": {"color": "#4CAF50"},
+            "bar": {"color": "#4CAF50" if daily_loss < 1.5 else "#FF9800" if daily_loss < 2.0 else "#F44336"},
             "steps": [
                 {"range": [0, 1.5], "color": "rgba(76,175,80,0.2)"},
                 {"range": [1.5, 2.0], "color": "rgba(255,152,0,0.2)"},
@@ -47,7 +57,7 @@ with col1:
 
 with col2:
     st.markdown("**Max Drawdown (per account)**")
-    max_dd = 5.1
+    max_dd = 5.1  # v1.5: from IBKR execution tracking
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=max_dd,
@@ -69,7 +79,7 @@ with col2:
 
 with col3:
     st.markdown("**Leverage**")
-    leverage = 1.3
+    leverage = 1.3  # v1.5: from IBKR margin tracking
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=leverage,
@@ -94,11 +104,21 @@ with col3:
 st.divider()
 st.subheader("Permission Vector (Current)")
 
-biases = {"Treasury": 0.85, "Curve": 1.00, "Prop": 1.15, "Tail": 0.90}
-cols = st.columns(4)
-for col, (name, bias) in zip(cols, biases.items()):
+biases = pv.get("biases", {})
+bias_labels = {1: "Treasury", 2: "Curve", 3: "Prop", 5: "Tail"}
+display_biases = {bias_labels.get(k, f"S{k}"): v for k, v in biases.items()} if biases else {
+    "Treasury": 0.85, "Curve": 1.00, "Prop": 1.15, "Tail": 0.90
+}
+
+cols = st.columns(len(display_biases))
+for col, (name, bias) in zip(cols, display_biases.items()):
     color = "🟢" if bias > 1.0 else "🟡" if bias > 0 else "🔴"
     col.metric(f"{color} {name}", f"{bias:.2f}x")
+
+if pv.get("requires_human_approval"):
+    st.warning("⚠️ Permission vector shift requires human approval")
+
+st.caption(f"Regime: {pv.get('regime', 'N/A')}")
 
 # ─── Drawdown History ───────────────────────────────────────────
 
@@ -136,11 +156,12 @@ st.plotly_chart(fig_dd, use_container_width=True)
 st.divider()
 st.subheader("Recent Risk Events")
 
+# v1.5: pull from audit log via engine state
 events = [
-    {"time": "14:32:15", "level": "INFO", "event": "Permission vector broadcast: regime=growth"},
+    {"time": "14:32:15", "level": "INFO", "event": f"Permission vector broadcast: regime={pv.get('regime', 'growth')}"},
     {"time": "14:30:00", "level": "INFO", "event": "Heartbeat OK — all sleeves responsive"},
     {"time": "13:45:22", "level": "WARN", "event": "EVAL-004 approaching breach threshold (DD: -5.1%)"},
-    {"time": "11:20:10", "level": "INFO", "event": "Sleeve 5 collar activated (VIX < 15)"},
+    {"time": "11:20:10", "level": "INFO", "event": f"Sleeve 5 collar activated (VIX < 15)"},
     {"time": "09:30:00", "level": "INFO", "event": "New trading day — daily P&L counters reset"},
 ]
 
