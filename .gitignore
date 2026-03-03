@@ -1,12 +1,31 @@
-/target
-**/*.rs.bk
-Cargo.lock
-__pycache__
-*.pyc
-.pytest_cache
-*.egg-info
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
 dist/
 build/
-quantum_weights.json
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Mock trading output
+mock_trading_logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment secrets
 .env
-*.log
+*.env.local
