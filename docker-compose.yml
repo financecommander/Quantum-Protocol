@@ -1,18 +1,18 @@
 # Quantum Protocol Production Stack
-# Engine + Prometheus + Grafana
+# Engine + Dashboard + Prometheus + Grafana
 
 services:
   engine:
     build:
       context: .
-      dockerfile: Dockerfile.engine
+      dockerfile: Dockerfile
     ports:
-      - "9999:9999/udp"
-      - "9090:9090"
+      - "8000:8000"
     environment:
-      - QP_UDP_ADDR=0.0.0.0:9999
-      - RUST_LOG=info
-      - QP_API_KEY=${QP_API_KEY:-}
+      - PYTHONPATH=/app
+      - ALPACA_API_KEY=${ALPACA_API_KEY:-}
+      - ALPACA_SECRET_KEY=${ALPACA_SECRET_KEY:-}
+      - IBKR_MASTER_ACCOUNT=${IBKR_MASTER_ACCOUNT:-}
       - QP_SLACK_WEBHOOK=${QP_SLACK_WEBHOOK:-}
       - QP_ALERT_EMAIL=${QP_ALERT_EMAIL:-}
     volumes:
@@ -20,11 +20,26 @@ services:
       - audit-logs:/var/log/quantum
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9090/metrics"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["streamlit", "run", "brain/dashboard/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    ports:
+      - "8501:8501"
+    environment:
+      - PYTHONPATH=/app
+      - MATRIX_API_URL=http://engine:8000
+    depends_on:
+      engine:
+        condition: service_healthy
+    restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:v2.51.0

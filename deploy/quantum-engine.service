@@ -1,5 +1,5 @@
 [Unit]
-Description=Quantum Protocol HFT Engine
+Description=Quantum Protocol Python Engine
 After=network.target
 Wants=network-online.target
 
@@ -8,18 +8,17 @@ Type=simple
 User=quantum
 Group=quantum
 WorkingDirectory=/opt/quantum-protocol
-ExecStart=/usr/local/bin/quantum-engine
+ExecStart=/usr/bin/python3 -m brain.engine
 Restart=on-failure
 RestartSec=5
 
 # Environment
-Environment=RUST_LOG=info
-Environment=QP_UDP_ADDR=0.0.0.0:9999
+Environment=PYTHONPATH=/opt/quantum-protocol
+Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-/etc/quantum-protocol/env
 
 # Resource limits
 LimitNOFILE=65536
-LimitMEMLOCK=infinity
 MemoryMax=4G
 CPUQuota=200%
 

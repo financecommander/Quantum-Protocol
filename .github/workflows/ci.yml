@@ -6,39 +6,37 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
-  rust-engine:
-    name: "Layer 1: Rust Engine"
+  python-engine:
+    name: "Layer 1: Python Engine + Brain"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          python-version: "3.11"
 
-      - name: Build
-        run: cargo build --verbose
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Run tests
-        run: cargo test --verbose
+      - name: Run engine parity tests
+        run: pytest tests/test_engine_parity.py -v
 
-      - name: Check formatting
-        run: cargo fmt -- --check
+      - name: Run engine state tests
+        run: pytest tests/test_engine_state.py -v
 
-      - name: Clippy lints
-        run: cargo clippy -- -D warnings
+      - name: Run market data feed tests
+        run: pytest tests/test_market_data_feed.py -v
+
+      - name: Run Terra Luna full replay
+        run: pytest tests/test_terra_luna_full.py -v
+
+      - name: Run Terra Luna legacy replay
+        run: python tests/terra_luna_replay.py
 
   python-platform:
     name: "Layer 2: Python Platform"
@@ -59,11 +57,27 @@ jobs:
       - name: Run platform tests
         run: pytest src/dashboard/tests/ -v
 
-      - name: Run Terra Luna replay
-        run: python tests/terra_luna_replay.py
+  python-brain:
+    name: "Layer 3: Brain Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run brain tests
+        run: pytest brain/tests/ -v
 
   quantum-oracle:
-    name: "Layer 3: Quantum Oracle (CI)"
+    name: "Layer 4: Quantum Oracle (CI)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

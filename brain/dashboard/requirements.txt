@@ -1,2 +1,4 @@
+# Streamlit dashboard deps — consolidated in root requirements.txt
+# This file kept for standalone dashboard development
 streamlit>=1.30.0
 plotly>=5.18.0

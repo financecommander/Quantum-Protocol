@@ -1,36 +1,45 @@
 #!/usr/bin/env bash
-# Quantum Protocol - Deploy Engine
-# Builds and deploys the Rust engine binary.
+# Quantum Protocol - Deploy Python Engine
+# Deploys the Python engine + dashboard to a target host.
 #
 # Usage: ./scripts/deploy.sh [TARGET_HOST]
 
 set -euo pipefail
 
 TARGET_HOST="${1:-localhost}"
+DEPLOY_DIR="/opt/quantum-protocol"
 
 echo "=== Quantum Protocol Engine Deployment ==="
 echo "Target: $TARGET_HOST"
 
-# Build release binary
-echo "Building release binary..."
-cargo build --release
-
-BINARY="target/release/quantum-engine"
-if [ ! -f "$BINARY" ]; then
-  echo "ERROR: Binary not found at $BINARY"
-  exit 1
-fi
-
-echo "Binary size: $(du -h "$BINARY" | cut -f1)"
+# Verify Python tests pass
+echo "Running tests..."
+python -m pytest tests/ src/dashboard/tests/ brain/tests/ -q --tb=short
+echo "Tests passed."
 
 if [ "$TARGET_HOST" = "localhost" ]; then
-  echo "Local deployment — binary ready at $BINARY"
-  echo "Run with: QP_UDP_ADDR=0.0.0.0:9999 RUST_LOG=info $BINARY"
+  echo "Local deployment — run with:"
+  echo "  PYTHONPATH=. python -m brain.engine"
+  echo ""
+  echo "Or use docker-compose:"
+  echo "  docker-compose up --build"
 else
   echo "Deploying to $TARGET_HOST..."
-  scp "$BINARY" "$TARGET_HOST":~/quantum-engine
-  ssh "$TARGET_HOST" "chmod +x ~/quantum-engine"
-  echo "Deployed. Start with: QP_UDP_ADDR=0.0.0.0:9999 RUST_LOG=info ~/quantum-engine"
+
+  # Sync code
+  rsync -avz --exclude '__pycache__' --exclude '.git' --exclude 'target' \
+    --exclude '.pytest_cache' --exclude '*.pyc' \
+    . "$TARGET_HOST":"$DEPLOY_DIR"/
+
+  # Install deps on remote
+  ssh "$TARGET_HOST" "cd $DEPLOY_DIR && pip install -r requirements.txt"
+
+  # Install systemd service
+  ssh "$TARGET_HOST" "sudo cp $DEPLOY_DIR/deploy/quantum-engine.service /etc/systemd/system/ && sudo systemctl daemon-reload"
+
+  echo "Deployed. Start with:"
+  echo "  sudo systemctl start quantum-engine"
+  echo "  sudo systemctl enable quantum-engine"
 fi
 
 echo "=== Deployment complete ==="
