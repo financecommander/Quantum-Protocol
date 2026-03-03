@@ -369,14 +369,24 @@ class PaperTradingRunner:
             logger.error(f"Tick error: {e}", exc_info=True)
 
     async def _fetch_market_data(self) -> Optional[MarketState]:
-        """Fetch live market data from IBKR."""
+        """Fetch live market data from IBKR (parallel requests)."""
         try:
-            # Fetch key market data points
-            vix = await self.ibkr.get_price("VIX", "IND") or 18.0
-            spx = await self.ibkr.get_price("SPX", "IND") or 5800.0
-            es = await self.ibkr.get_price("ES", "FUT") or spx
-            tnx = await self.ibkr.get_price("ZN", "FUT") or 110.0
-            zf = await self.ibkr.get_price("ZF", "FUT") or 108.0
+            # Fetch all prices concurrently instead of sequentially
+            results = await asyncio.gather(
+                self.ibkr.get_price("VIX", "IND"),
+                self.ibkr.get_price("SPX", "IND"),
+                self.ibkr.get_price("ES", "FUT"),
+                self.ibkr.get_price("ZN", "FUT"),
+                self.ibkr.get_price("ZF", "FUT"),
+                return_exceptions=True,
+            )
+
+            # Unpack with defaults for any failures
+            vix = results[0] if isinstance(results[0], (int, float)) else 18.0
+            spx = results[1] if isinstance(results[1], (int, float)) else 5800.0
+            es = results[2] if isinstance(results[2], (int, float)) else spx
+            tnx = results[3] if isinstance(results[3], (int, float)) else 110.0
+            zf = results[4] if isinstance(results[4], (int, float)) else 108.0
 
             return MarketState(
                 timestamp=datetime.now(timezone.utc),

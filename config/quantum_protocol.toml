@@ -3,7 +3,7 @@
 # Environment variable substitution: use ${ENV_VAR} syntax
 
 [engine]
-tick_interval_seconds = 1.0
+tick_interval_seconds = 10.0
 market_data_timeout_seconds = 10.0
 max_position = 1000000.0
 hedge_ratio = 0.8

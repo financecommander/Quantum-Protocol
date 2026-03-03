@@ -32,7 +32,7 @@ class QuantumEngine:
         self,
         config_path: str = "config/quantum_protocol.toml",
         portfolio_value: float = 50_000.0,
-        tick_interval: float = 60.0,
+        tick_interval: float = 10.0,
     ):
         self.config_path = config_path
         self.portfolio_value = portfolio_value
@@ -122,13 +122,18 @@ class QuantumEngine:
 
     async def _process_tick(self) -> dict:
         """Process a single tick. Returns target positions."""
+        t0 = time.perf_counter()
+
+        # 1. Fetch market data
         market = await self.feed.get_market_state()
+        t_feed = time.perf_counter()
         self._last_market = market
 
-        # Run orchestrator
+        # 2. Run orchestrator
         positions = self.orchestrator.tick(market)
+        t_orch = time.perf_counter()
 
-        # Log crisis transitions
+        # 3. Log crisis transitions
         crisis = self.orchestrator.crisis_level.value
         if self._ticks_processed == 0 or self._last_crisis != crisis:
             self.audit.log_risk_event(
@@ -142,6 +147,22 @@ class QuantumEngine:
 
         self._ticks_processed += 1
         self._last_tick_time = time.monotonic()
+        t_total = time.perf_counter()
+
+        # Latency instrumentation
+        feed_ms = (t_feed - t0) * 1000
+        orch_ms = (t_orch - t_feed) * 1000
+        total_ms = (t_total - t0) * 1000
+        self._last_tick_latency = {
+            "feed_ms": round(feed_ms, 2),
+            "orchestrator_ms": round(orch_ms, 2),
+            "total_ms": round(total_ms, 2),
+        }
+        logger.info(
+            f"Tick #{self._ticks_processed} latency: "
+            f"feed={feed_ms:.1f}ms orch={orch_ms:.1f}ms total={total_ms:.1f}ms | "
+            f"VIX={market.vix:.1f} crisis={crisis}"
+        )
 
         return positions
 
@@ -235,6 +256,7 @@ class QuantumEngine:
             "kill_switch": orch.is_killed if orch else False,
             "human_approval_pending": orch._human_approval_pending if orch else False,
             "audit_summary": self.audit.get_compliance_summary() if self.audit else {},
+            "tick_latency": getattr(self, "_last_tick_latency", {}),
         }
 
 

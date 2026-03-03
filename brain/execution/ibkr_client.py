@@ -121,6 +121,8 @@ class IBKRClient:
         self.state = ConnectionState.DISCONNECTED
         self._ib = None  # ib_insync.IB instance
         self._contracts_cache: dict[str, object] = {}
+        self._qualified_contracts: set[str] = set()  # Track qualified contract keys
+        self._last_prices: dict[str, float] = {}  # Last-known prices as fallback
         self._order_callbacks: list[Callable] = []
         self._reconnect_count = 0
 
@@ -238,31 +240,44 @@ class IBKRClient:
         """Get current market price for a symbol."""
         if not self.is_connected():
             logger.error("Not connected to IBKR")
-            return None
+            return self._last_prices.get(symbol)
 
         contract = self._make_contract(symbol, sec_type, **kwargs)
+        cache_key = f"{symbol}_{sec_type}_{kwargs}"
 
         try:
-            self._ib.qualifyContracts(contract)
+            # Only qualify contract once per session
+            if cache_key not in self._qualified_contracts:
+                self._ib.qualifyContracts(contract)
+                self._qualified_contracts.add(cache_key)
+
             ticker = self._ib.reqMktData(contract, genericTickList="", snapshot=True)
-            
-            # Wait for data
-            for _ in range(50):  # 5 second timeout
+
+            # Reduced polling: 15 iterations × 0.1s = 1.5s max (was 5s)
+            for _ in range(15):
                 await asyncio.sleep(0.1)
                 if ticker.last is not None and ticker.last > 0:
                     self._ib.cancelMktData(contract)
+                    self._last_prices[symbol] = float(ticker.last)
                     return float(ticker.last)
                 if ticker.close is not None and ticker.close > 0:
                     self._ib.cancelMktData(contract)
+                    self._last_prices[symbol] = float(ticker.close)
                     return float(ticker.close)
 
             self._ib.cancelMktData(contract)
+
+            # Fall back to last known price
+            if symbol in self._last_prices:
+                logger.warning(f"No fresh price for {symbol}, using last known: {self._last_prices[symbol]}")
+                return self._last_prices[symbol]
+
             logger.warning(f"No price data for {symbol}")
             return None
 
         except Exception as e:
             logger.error(f"Price request failed for {symbol}: {e}")
-            return None
+            return self._last_prices.get(symbol)
 
     async def get_vix(self) -> Optional[float]:
         """Get current VIX level — critical for crisis protocols."""
