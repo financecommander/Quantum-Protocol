@@ -20,7 +20,7 @@ Date: 2026-02-26
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -631,7 +631,7 @@ class ElicitabilityAnalyzer:
         actually produce an expanded output?
         """
         analysis = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "mode": aggregated.mode_used.value,
             "mechanisms": [m.value for m in aggregated.mechanisms_active],
             "elicitability_expanded": aggregated.elicitability_expanded,

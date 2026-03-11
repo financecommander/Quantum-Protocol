@@ -60,7 +60,7 @@ class TestStateBeforeStart:
         alloc = state["allocation"]
         assert alloc["treasury_yield"] == 0.10
         assert alloc["prop_scaling"] == 0.45
-        assert alloc["cash"] == 0.20
+        assert alloc["cash"] == 0.10
 
     def test_kill_switch_default_off(self, engine):
         state = engine.get_state()

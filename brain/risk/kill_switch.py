@@ -7,7 +7,7 @@ Direct port from Rust KillSwitch implementation.
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -72,12 +72,12 @@ class KillSwitch:
         self.consecutive_rejections = 0
 
     def heartbeat(self):
-        self.last_heartbeat = datetime.utcnow()
+        self.last_heartbeat = datetime.now(timezone.utc)
 
     def check_heartbeat(self) -> bool:
         if self.last_heartbeat is None:
             return False
-        elapsed = (datetime.utcnow() - self.last_heartbeat).total_seconds()
+        elapsed = (datetime.now(timezone.utc) - self.last_heartbeat).total_seconds()
         if elapsed > self.config.heartbeat_timeout_seconds:
             self._trigger(KillReason.HEARTBEAT_TIMEOUT)
             return True
@@ -88,7 +88,7 @@ class KillSwitch:
             return
         self.is_killed = True
         self.kill_reason = reason
-        self.kill_time = datetime.utcnow()
+        self.kill_time = datetime.now(timezone.utc)
         logger.critical(f"KILL SWITCH ACTIVATED: {reason.value} at {self.kill_time.isoformat()}")
 
     def manual_kill(self):

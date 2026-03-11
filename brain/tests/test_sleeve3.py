@@ -17,7 +17,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from strategies.sleeve3_prop_scaling import (
     PropScalingStrategy, Sleeve3Config, EvalAccount, AccountPhase,
     SignalType, SignalSource, LLMSignal, AssetClass,
@@ -39,7 +39,7 @@ def account():
         seed_capital=10_000,
         current_capital=10_000,
         peak_capital=10_000,
-        eval_start_date=datetime.utcnow(),
+        eval_start_date=datetime.now(timezone.utc),
     )
 
 
@@ -54,7 +54,7 @@ class MockMarket:
         self.es_price = spx
         self.zn_price = 110.0
         self.zf_price = 108.0
-        self.timestamp = datetime.utcnow()
+        self.timestamp = datetime.now(timezone.utc)
 
 
 # ═══ Account Initialization ═════════════════════════════════════

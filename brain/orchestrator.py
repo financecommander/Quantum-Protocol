@@ -29,9 +29,9 @@ class SleeveAllocation:
     treasury_yield: float = 0.10       # Sleeve 1
     compression_curve: float = 0.15    # Sleeve 2
     prop_scaling: float = 0.45         # Sleeve 3 (primary alpha)
-    rwa_infrastructure: float = 0.00   # Sleeve 4 (deferred to v1.5)
+    rwa_infrastructure: float = 0.10   # Sleeve 4 (RWA/Crypto)
     convexity_shield: float = 0.10     # Sleeve 5 (redesigned)
-    cash: float = 0.20                 # Reserve / unallocated
+    cash: float = 0.10                 # Reserve / unallocated
 
     def __post_init__(self):
         total = (self.treasury_yield + self.compression_curve +
@@ -142,8 +142,11 @@ class Orchestrator:
         except ImportError:
             logger.warning("Sleeve 3 (Prop Scaling) not available")
 
-        # Sleeve 4 deferred to v1.5
-        logger.info("Sleeve 4 (RWA + Infrastructure) deferred to v1.5")
+        try:
+            from strategies.sleeve4_rwa_crypto import RwaCryptoStrategy
+            self._sleeves[4] = RwaCryptoStrategy()
+        except ImportError:
+            logger.warning("Sleeve 4 (RWA/Crypto) not available")
 
         try:
             from strategies.sleeve5_convexity_shield import ConvexityShieldStrategy
@@ -341,7 +344,7 @@ class Orchestrator:
                     treasury_yield=max(0, min(0.30, self.base_allocation.treasury_yield + adj.sleeve1_delta)),
                     compression_curve=max(0, min(0.30, self.base_allocation.compression_curve + adj.sleeve2_delta)),
                     prop_scaling=max(0.20, min(0.65, self.base_allocation.prop_scaling + adj.sleeve3_delta)),
-                    rwa_infrastructure=0.00,  # Deferred
+                    rwa_infrastructure=self.base_allocation.rwa_infrastructure,
                     convexity_shield=max(0.05, min(0.20, self.base_allocation.convexity_shield + adj.sleeve5_delta)),
                     cash=max(0.05, min(0.40, self.base_allocation.cash + adj.cash_delta)),
                 )

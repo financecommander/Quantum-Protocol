@@ -33,6 +33,9 @@ prop_accounts = []
 [sleeves.rwa_crypto]
 enabled = true
 min_spread_bps = 5.0
+fee_bps = 2.0
+max_position_usd = 50000.0
+symbols = ["BTC", "ETH", "SOL"]
 
 [sleeves.tail_hedging]
 enabled = true

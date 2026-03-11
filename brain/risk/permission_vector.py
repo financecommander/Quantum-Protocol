@@ -16,7 +16,7 @@ The Permission Vector GATES all sleeve execution:
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger("matrix.risk.permission_vector")
@@ -31,13 +31,13 @@ class PermissionVector:
     Every sleeve MUST check its bias before executing.
     """
     regime: str                         # "growth", "stress", "transition", "compression"
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     # Per-sleeve bias multipliers (1.0 = neutral, >1 = favored, <1 = reduced, 0 = blocked)
     treasury_bias: float = 1.0          # Sleeve 1
     curve_bias: float = 1.0             # Sleeve 2
     prop_bias: float = 1.0              # Sleeve 3
-    rwa_bias: float = 0.0               # Sleeve 4 (deferred v1.5)
+    rwa_bias: float = 1.0               # Sleeve 4 (RWA/Crypto)
     tail_bias: float = 1.0              # Sleeve 5
     
     # Master heartbeat — sleeves use this for the 65-min failsafe
@@ -83,7 +83,7 @@ REGIME_VECTORS = {
         treasury_bias=0.85,     # Reduce safe haven
         curve_bias=1.0,         # Neutral
         prop_bias=1.15,         # +15% to primary alpha
-        rwa_bias=0.0,           # Deferred
+        rwa_bias=1.10,          # +10% crypto arb (calm markets = tighter spreads)
         tail_bias=0.90,         # Slightly reduce hedge cost
     ),
     "stress": PermissionVector(
@@ -91,7 +91,7 @@ REGIME_VECTORS = {
         treasury_bias=1.12,     # +12% to safe haven
         curve_bias=0.80,        # Reduce curve trades (spreads widen unpredictably)
         prop_bias=0.70,         # -30% to prop (drawdown risk)
-        rwa_bias=0.0,           # Deferred
+        rwa_bias=0.50,          # -50% crypto (correlates in stress)
         tail_bias=1.12,         # +12% to tail hedge
     ),
     "transition": PermissionVector(
@@ -99,7 +99,7 @@ REGIME_VECTORS = {
         treasury_bias=1.0,      # Neutral
         curve_bias=1.10,        # +10% to curve (regime shifts = spread opportunities)
         prop_bias=0.95,         # Slightly reduced
-        rwa_bias=0.0,           # Deferred
+        rwa_bias=0.90,          # Slightly reduced
         tail_bias=1.05,         # Slightly elevated hedge
     ),
     "compression": PermissionVector(
@@ -107,7 +107,7 @@ REGIME_VECTORS = {
         treasury_bias=1.0,      # Neutral
         curve_bias=1.05,        # +5% (low vol = good for spreads)
         prop_bias=1.10,         # +10% (momentum works in calm markets)
-        rwa_bias=0.0,           # Deferred
+        rwa_bias=1.15,          # +15% crypto arb (compression = good for basis trades)
         tail_bias=0.80,         # Reduce — insurance is a drag in calm markets
     ),
     "crisis": PermissionVector(
@@ -115,7 +115,7 @@ REGIME_VECTORS = {
         treasury_bias=1.20,     # Max safe haven
         curve_bias=0.0,         # Block — spreads blow out unpredictably
         prop_bias=0.0,          # Block — flatten prop accounts
-        rwa_bias=0.0,           # Deferred
+        rwa_bias=0.0,           # Block — crypto correlates fully in crisis
         tail_bias=1.30,         # Max hedge activation
     ),
 }
@@ -146,7 +146,7 @@ def generate_permission_vector(
         rwa_bias=template.rwa_bias,
         tail_bias=template.tail_bias,
     )
-    vector.timestamp = datetime.utcnow()
+    vector.timestamp = datetime.now(timezone.utc)
     
     # Check for large shifts requiring human approval
     if previous_vector is not None:

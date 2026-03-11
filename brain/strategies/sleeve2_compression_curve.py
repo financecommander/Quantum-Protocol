@@ -22,7 +22,7 @@ INSTRUMENTS: ZN (10yr), ZF (5yr), ZT (2yr for butterfly in v1.5)
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -55,7 +55,7 @@ class CurveMarketData:
     zn_price: float
     zf_price: float
     zt_price: float = 0.0
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -154,7 +154,7 @@ class CompressionCurveStrategy:
 
         # Heartbeat check first (safety)
         if self.last_master_heartbeat is not None:
-            elapsed = (datetime.utcnow() - self.last_master_heartbeat).total_seconds() / 60
+            elapsed = (datetime.now(timezone.utc) - self.last_master_heartbeat).total_seconds() / 60
             if elapsed > self.config.master_heartbeat_timeout_minutes:
                 return True, f"master_heartbeat_timeout ({elapsed:.0f}min)"
 
@@ -195,7 +195,7 @@ class CompressionCurveStrategy:
         from orchestrator import SleeveSignal
 
         data = self._convert_market_data(market)
-        self.last_master_heartbeat = datetime.utcnow()
+        self.last_master_heartbeat = datetime.now(timezone.utc)
 
         # --- Check exit first ---
         should_exit, reason = self.check_exit(data)
@@ -267,7 +267,7 @@ class CompressionCurveStrategy:
     def _open_trade(self, trade_type: CurveTradeType, data: CurveMarketData):
         self.current_trade = trade_type
         self.entry_spread = data.spread_2s10s
-        self.entry_time = datetime.utcnow()
+        self.entry_time = datetime.now(timezone.utc)
         self._trade_count += 1
         logger.info(f"Sleeve 2 ENTRY: {trade_type.value} at {self.entry_spread:.1f}bps (#{self._trade_count})")
 

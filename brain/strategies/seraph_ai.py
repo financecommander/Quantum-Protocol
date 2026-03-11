@@ -24,7 +24,7 @@ v2.0 Roadmap:
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -234,7 +234,7 @@ class SeraphAI:
         confidence = min(0.95, confidence)
         
         # Update state
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         previous = self.state.regime if self.state else None
         days_in = self.state.days_in_regime + 1 if (self.state and self.state.regime == regime) else 1
         
@@ -330,7 +330,6 @@ class SeraphAI:
 
     def is_rebalance_due(self, now: Optional[datetime] = None) -> bool:
         """Check if quarterly rebalance is due."""
-        from datetime import timezone
         now = now or datetime.now(timezone.utc)
         if self._last_rebalance is None:
             return True
@@ -344,7 +343,6 @@ class SeraphAI:
 
     def mark_rebalanced(self):
         """Record that rebalancing occurred."""
-        from datetime import timezone
         self._last_rebalance = datetime.now(timezone.utc)
 
     def get_status(self) -> dict:

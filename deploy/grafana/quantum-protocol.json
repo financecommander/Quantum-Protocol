@@ -1,0 +1,134 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "quantum-protocol",
+    "title": "Quantum Protocol Engine",
+    "tags": ["quantum-protocol", "trading"],
+    "timezone": "utc",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "10s",
+    "time": { "from": "now-1h", "to": "now" },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Tick Latency (p95)",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(qp_tick_latency_seconds_bucket{phase=\"total\"}[5m]))",
+            "legendFormat": "Total p95"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(qp_tick_latency_seconds_bucket{phase=\"feed\"}[5m]))",
+            "legendFormat": "Feed p95"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(qp_tick_latency_seconds_bucket{phase=\"orchestrator\"}[5m]))",
+            "legendFormat": "Orchestrator p95"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 0.001 },
+                { "color": "red", "value": 0.01 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Crisis Level",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+        "targets": [
+          {
+            "expr": "qp_crisis_level",
+            "legendFormat": "Crisis Level"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "type": "value", "options": { "0": { "text": "Normal" }, "1": { "text": "Elevated" }, "2": { "text": "Severe" }, "3": { "text": "Surgical" }, "4": { "text": "Bunker" } } }
+            ],
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 1 },
+                { "color": "orange", "value": 2 },
+                { "color": "red", "value": 3 },
+                { "color": "dark-red", "value": 4 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Ticks per Second",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+        "targets": [
+          {
+            "expr": "rate(qp_ticks_total[1m])",
+            "legendFormat": "Ticks/s"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Signals per Sleeve",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+        "targets": [
+          {
+            "expr": "rate(qp_signals_generated_total[5m])",
+            "legendFormat": "Sleeve {{sleeve_id}}"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Kill Switch",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 16 },
+        "targets": [
+          {
+            "expr": "qp_kill_switch_active",
+            "legendFormat": "Kill Switch"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "type": "value", "options": { "0": { "text": "INACTIVE", "color": "green" }, "1": { "text": "ACTIVE", "color": "red" } } }
+            ]
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Uptime",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 16 },
+        "targets": [
+          {
+            "expr": "time() - process_start_time_seconds",
+            "legendFormat": "Uptime"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": { "unit": "s" }
+        }
+      }
+    ]
+  },
+  "overwrite": true
+}

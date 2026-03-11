@@ -7,7 +7,7 @@ Deterministic state machine — auditable, reproducible, FINRA-compliant.
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -67,7 +67,7 @@ class CrisisProtocol:
         self.config = config or CrisisConfig()
         self.state = CrisisState(
             level=CrisisLevel.NORMAL,
-            entered_at=datetime.utcnow(),
+            entered_at=datetime.now(timezone.utc),
             vix_at_entry=15.0,
         )
         self.deescalation_counter = 0
@@ -105,7 +105,7 @@ class CrisisProtocol:
         old_level = self.state.level
         self.state = CrisisState(
             level=new_level,
-            entered_at=datetime.utcnow(),
+            entered_at=datetime.now(timezone.utc),
             vix_at_entry=vix,
             previous_level=old_level,
         )

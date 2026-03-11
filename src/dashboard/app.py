@@ -17,12 +17,20 @@ Endpoints:
   GET  /internal/state  — Full engine state (internal use by Streamlit dashboard)
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
 from typing import Optional
 import time
 import json
 import os
+
+from prometheus_client import (
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+    CONTENT_TYPE_LATEST,
+)
 
 app = FastAPI(
     title="Quantum Protocol Platform",
@@ -78,6 +86,32 @@ _engine_metrics = {
 _audit_log = []
 
 _start_time = time.time()
+
+# ---------------------------------------------------------------------------
+# Prometheus Metrics
+# ---------------------------------------------------------------------------
+
+TICKS_TOTAL = Counter("qp_ticks_total", "Total engine ticks processed")
+TICK_LATENCY = Histogram(
+    "qp_tick_latency_seconds",
+    "Tick processing latency",
+    ["phase"],  # feed, orchestrator, total
+    buckets=[0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0],
+)
+CRISIS_LEVEL = Gauge("qp_crisis_level", "Current crisis level (0=normal, 1=elevated, 2=severe, 3=surgical, 4=bunker)")
+KILL_SWITCH = Gauge("qp_kill_switch_active", "Kill switch status (0=inactive, 1=active)")
+SIGNALS_TOTAL = Counter("qp_signals_generated_total", "Signals generated per sleeve", ["sleeve_id"])
+
+_CRISIS_LEVEL_MAP = {
+    "Normal": 0, "Elevated": 1, "Severe": 2, "Surgical": 3, "Bunker": 4,
+}
+
+
+def update_prometheus_metrics(state: dict):
+    """Push engine state into Prometheus gauges. Called externally after each tick."""
+    crisis = state.get("crisis_level", "Normal")
+    CRISIS_LEVEL.set(_CRISIS_LEVEL_MAP.get(crisis, 0))
+    KILL_SWITCH.set(1 if state.get("kill_switch_active", False) else 0)
 
 
 # ---------------------------------------------------------------------------
@@ -173,16 +207,38 @@ def _get_uptime() -> float:
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
+    """Health check endpoint for Docker/Prometheus scraping."""
     state = _get_engine_state()
     if state is not None:
         return {
-            "status": "ok",
+            "status": "healthy",
             "engine": "connected",
             "uptime_seconds": state.get("uptime_seconds", 0.0),
             "ticks_processed": state.get("ticks_processed", 0),
+            "crisis_level": state.get("crisis_level", "Normal"),
+            "kill_switch_active": state.get("kill_switch_active", False),
+            "tick_latency": state.get("tick_latency", {
+                "feed_ms": 0.0, "orchestrator_ms": 0.0, "total_ms": 0.0,
+            }),
         }
-    return {"status": "ok", "uptime_seconds": _get_uptime()}
+    return {
+        "status": "healthy",
+        "engine": "disconnected",
+        "uptime_seconds": _get_uptime(),
+        "ticks_processed": _engine_metrics["ticks_processed"],
+        "crisis_level": _engine_metrics["crisis_state"],
+        "kill_switch_active": False,
+        "tick_latency": {"feed_ms": 0.0, "orchestrator_ms": 0.0, "total_ms": 0.0},
+    }
+
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint."""
+    state = _get_engine_state()
+    if state is not None:
+        update_prometheus_metrics(state)
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/dashboard", response_model=DashboardResponse)

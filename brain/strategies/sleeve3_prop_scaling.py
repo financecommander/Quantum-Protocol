@@ -68,7 +68,7 @@ Powered By: SERAPH AI™ + SHIELD™
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
 
@@ -119,7 +119,7 @@ class LLMSignal:
     conviction: float                   # 0.0 - 1.0 (maps to position sizing)
     thesis: str = ""                    # LLM reasoning (for audit log)
     source_model: str = "grok"          # Which LLM generated this
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     target_pct: float = 0.0            # Expected return (if provided)
     stop_loss_pct: float = 0.0         # Suggested stop (if provided)
     asset_class: AssetClass = AssetClass.EQUITY
@@ -255,7 +255,7 @@ class PropScalingStrategy:
                 seed_capital=self.config.seed_capital,
                 current_capital=self.config.seed_capital,
                 peak_capital=self.config.seed_capital,
-                eval_start_date=datetime.utcnow(),
+                eval_start_date=datetime.now(timezone.utc),
             )
             self.accounts.append(acct)
         self._is_initialized = True
@@ -314,7 +314,7 @@ class PropScalingStrategy:
         account.peak_capital = new_capital
         account.phase = AccountPhase.SCALING
         account.days_in_eval = 0
-        account.eval_start_date = datetime.utcnow()
+        account.eval_start_date = datetime.now(timezone.utc)
         logger.info(
             f"Account {account.account_id} SCALED: {old_mult:.0f}x → {account.scaling_multiplier:.0f}x "
             f"(${new_capital:,.0f})"
@@ -328,7 +328,7 @@ class PropScalingStrategy:
         account.current_capital = self.config.seed_capital
         account.peak_capital = self.config.seed_capital
         account.days_in_eval = 0
-        account.eval_start_date = datetime.utcnow()
+        account.eval_start_date = datetime.now(timezone.utc)
         account.daily_pnl = 0.0
         logger.warning(
             f"Account {account.account_id} RESET: {reason} "
@@ -381,7 +381,7 @@ class PropScalingStrategy:
 
     def _prune_expired_llm_signals(self):
         """Remove LLM signals older than TTL."""
-        cutoff = datetime.utcnow() - timedelta(hours=self._llm_signal_ttl_hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=self._llm_signal_ttl_hours)
         before = len(self._llm_signals)
         self._llm_signals = [s for s in self._llm_signals if s.timestamp > cutoff]
         pruned = before - len(self._llm_signals)
@@ -501,7 +501,7 @@ class PropScalingStrategy:
             self.initialize_accounts()
 
         # Record heartbeat
-        self._last_master_heartbeat = datetime.utcnow()
+        self._last_master_heartbeat = datetime.now(timezone.utc)
 
         # ─── Heartbeat failsafe ─────────────────────────────
         # (checked against PREVIOUS heartbeat, not this one)

@@ -30,10 +30,10 @@ class TestRegimeVectors:
         assert v.curve_bias == 0.0
         assert v.tail_bias > 1.0
 
-    def test_rwa_always_zero(self):
-        """Sleeve 4 deferred to v1.5."""
-        for regime, v in REGIME_VECTORS.items():
-            assert v.rwa_bias == 0.0, f"RWA should be 0 in {regime}"
+    def test_rwa_zero_in_crisis(self):
+        """Sleeve 4 blocked in crisis (crypto correlates with equities)."""
+        v = REGIME_VECTORS["crisis"]
+        assert v.rwa_bias == 0.0, "RWA should be 0 in crisis"
 
 
 class TestGetSleeveBias:

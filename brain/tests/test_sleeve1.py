@@ -16,7 +16,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from strategies.sleeve1_treasury_yield import (
     TreasuryYieldStrategy, Sleeve1Config, YieldMarketData,
     YieldRegime, YieldAction,
@@ -49,7 +49,7 @@ class MockMarket:
         self.zf_price = 108.0
         self.yield_change_1d = yield_change_1d
         self.yield_std_20d = yield_std_20d
-        self.timestamp = datetime.utcnow()
+        self.timestamp = datetime.now(timezone.utc)
 
 
 # ═══ Regime Classification ═══════════════════════════════════════
@@ -171,11 +171,11 @@ class TestSignalDirection:
 
 class TestHeartbeat:
     def test_no_timeout_when_recent(self, strategy):
-        strategy._last_master_heartbeat = datetime.utcnow() - timedelta(minutes=10)
+        strategy._last_master_heartbeat = datetime.now(timezone.utc) - timedelta(minutes=10)
         assert strategy.check_heartbeat_timeout() is False
 
     def test_timeout_after_65_min(self, strategy):
-        strategy._last_master_heartbeat = datetime.utcnow() - timedelta(minutes=70)
+        strategy._last_master_heartbeat = datetime.now(timezone.utc) - timedelta(minutes=70)
         assert strategy.check_heartbeat_timeout() is True
 
     def test_no_timeout_without_heartbeat(self, strategy):

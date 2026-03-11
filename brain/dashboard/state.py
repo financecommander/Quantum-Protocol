@@ -178,11 +178,11 @@ def get_sleeve_allocations() -> dict:
             "pnl": 0.0,
             "status": _get_sleeve_status(state, 3),
         },
-        "Sleeve 4: RWA (deferred)": {
-            "target": 0.00,
-            "actual": 0.00,
+        "Sleeve 4: RWA/Crypto": {
+            "target": 0.10,
+            "actual": alloc.get("rwa_infrastructure", 0.10),
             "pnl": 0.0,
-            "status": "v1.5",
+            "status": _get_sleeve_status(state, 4),
         },
         "Sleeve 5: Convexity Shield": {
             "target": 0.10,
@@ -191,8 +191,8 @@ def get_sleeve_allocations() -> dict:
             "status": _get_sleeve_status(state, 5),
         },
         "Cash Reserve": {
-            "target": 0.20,
-            "actual": alloc.get("cash", 0.20),
+            "target": 0.10,
+            "actual": alloc.get("cash", 0.10),
             "pnl": 0.0,
             "status": "—",
         },

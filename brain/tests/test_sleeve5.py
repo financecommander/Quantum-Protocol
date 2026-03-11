@@ -8,7 +8,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from strategies.sleeve5_convexity_shield import (
     ConvexityShieldStrategy, ConvexityConfig, HedgeRegime, HedgeAction,
 )
@@ -22,7 +22,7 @@ def shield():
 
 def make_market(vix=18.0, spx=5000.0, **kwargs) -> MarketState:
     defaults = dict(
-        timestamp=datetime.utcnow(), vix=vix, spx=spx,
+        timestamp=datetime.now(timezone.utc), vix=vix, spx=spx,
         tnx=42.0, dxy=104.0, es_price=spx, zn_price=110.0, zf_price=108.0,
     )
     defaults.update(kwargs)
@@ -100,11 +100,11 @@ class TestHeartbeatFailsafe:
     """Master heartbeat silent > 65 minutes → auto-liquidate."""
 
     def test_no_timeout_when_recent(self, shield):
-        shield._last_master_heartbeat = datetime.utcnow() - timedelta(minutes=10)
+        shield._last_master_heartbeat = datetime.now(timezone.utc) - timedelta(minutes=10)
         assert shield.check_heartbeat_timeout() is False
 
     def test_timeout_after_65_minutes(self, shield):
-        shield._last_master_heartbeat = datetime.utcnow() - timedelta(minutes=70)
+        shield._last_master_heartbeat = datetime.now(timezone.utc) - timedelta(minutes=70)
         assert shield.check_heartbeat_timeout() is True
 
     def test_no_timeout_without_heartbeat(self, shield):
@@ -113,13 +113,13 @@ class TestHeartbeatFailsafe:
 
     def test_under_65_not_triggered(self, shield):
         """64 minutes is safely under the 65-minute threshold."""
-        shield._last_master_heartbeat = datetime.utcnow() - timedelta(minutes=64)
+        shield._last_master_heartbeat = datetime.now(timezone.utc) - timedelta(minutes=64)
         assert shield.check_heartbeat_timeout() is False
 
     def test_heartbeat_liquidate_signal(self, shield):
         """Heartbeat timeout should produce LIQUIDATE action.
         Note: We need to set heartbeat BEFORE generate_signal updates it."""
-        shield._last_master_heartbeat = datetime.utcnow() - timedelta(minutes=70)
+        shield._last_master_heartbeat = datetime.now(timezone.utc) - timedelta(minutes=70)
         # Temporarily prevent generate_signal from updating heartbeat
         market = make_market()
         # The generate_signal updates heartbeat first, so we test the check directly

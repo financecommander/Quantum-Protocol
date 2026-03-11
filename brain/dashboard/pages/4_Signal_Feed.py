@@ -2,7 +2,7 @@
 
 import streamlit as st
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -84,7 +84,7 @@ else:
 st.divider()
 st.subheader("Signal History (24h)")
 
-hours = [datetime.utcnow() - timedelta(hours=i) for i in range(24, 0, -1)]
+hours = [datetime.now(timezone.utc) - timedelta(hours=i) for i in range(24, 0, -1)]
 rsi_signals = [0, 0, 1, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 1, 0]
 mom_signals = [0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0]
 llm_signals = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]

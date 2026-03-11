@@ -149,7 +149,7 @@ class TestGetSleeveAllocations:
         assert "Sleeve 1: Treasury Yield" in alloc
         assert "Sleeve 2: Compression & Curve" in alloc
         assert "Sleeve 3: Prop Scaling" in alloc
-        assert "Sleeve 4: RWA (deferred)" in alloc
+        assert "Sleeve 4: RWA/Crypto" in alloc
         assert "Sleeve 5: Convexity Shield" in alloc
         assert "Cash Reserve" in alloc
 
@@ -166,12 +166,10 @@ class TestGetSleeveAllocations:
         total = sum(v["target"] for v in alloc.values())
         assert abs(total - 1.0) < 0.001
 
-    def test_sleeve4_deferred(self):
+    def test_sleeve4_active(self):
         alloc = get_sleeve_allocations()
-        s4 = alloc["Sleeve 4: RWA (deferred)"]
-        assert s4["target"] == 0.0
-        assert s4["actual"] == 0.0
-        assert s4["status"] == "v1.5"
+        s4 = alloc["Sleeve 4: RWA/Crypto"]
+        assert s4["target"] == 0.10
 
 
 # ═══════════════════════════════════════════════════════════════════════════

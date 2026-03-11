@@ -8,7 +8,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from strategies.sleeve2_compression_curve import (
     CompressionCurveStrategy, Sleeve2Config, CurveMarketData,
     CurveTradeType, CurveRegime,
@@ -138,7 +138,7 @@ class TestExitRules:
         """Flattener profits when spread narrows by 20bps."""
         strategy.current_trade = CurveTradeType.FLATTENER
         strategy.entry_spread = 120.0
-        strategy.last_master_heartbeat = datetime.utcnow()
+        strategy.last_master_heartbeat = datetime.now(timezone.utc)
 
         data = make_data(spread_2s10s=100.0)  # Narrowed 20bps ✓
         should_exit, reason = strategy.check_exit(data)
@@ -149,7 +149,7 @@ class TestExitRules:
         """Flattener stops out when spread widens by 20bps."""
         strategy.current_trade = CurveTradeType.FLATTENER
         strategy.entry_spread = 120.0
-        strategy.last_master_heartbeat = datetime.utcnow()
+        strategy.last_master_heartbeat = datetime.now(timezone.utc)
 
         data = make_data(spread_2s10s=140.0)  # Widened 20bps ✗
         should_exit, reason = strategy.check_exit(data)
@@ -160,7 +160,7 @@ class TestExitRules:
         """Steepener profits when spread widens by 20bps."""
         strategy.current_trade = CurveTradeType.STEEPENER
         strategy.entry_spread = -20.0
-        strategy.last_master_heartbeat = datetime.utcnow()
+        strategy.last_master_heartbeat = datetime.now(timezone.utc)
 
         data = make_data(spread_2s10s=0.0)  # Widened 20bps ✓
         should_exit, reason = strategy.check_exit(data)
@@ -171,7 +171,7 @@ class TestExitRules:
         """Steepener stops out when spread narrows further."""
         strategy.current_trade = CurveTradeType.STEEPENER
         strategy.entry_spread = -20.0
-        strategy.last_master_heartbeat = datetime.utcnow()
+        strategy.last_master_heartbeat = datetime.now(timezone.utc)
 
         data = make_data(spread_2s10s=-40.0)  # Narrowed 20bps against ✗
         should_exit, reason = strategy.check_exit(data)
@@ -182,7 +182,7 @@ class TestExitRules:
         """Master silent >65 min → emergency exit."""
         strategy.current_trade = CurveTradeType.FLATTENER
         strategy.entry_spread = 120.0
-        strategy.last_master_heartbeat = datetime.utcnow() - timedelta(minutes=70)
+        strategy.last_master_heartbeat = datetime.now(timezone.utc) - timedelta(minutes=70)
 
         data = make_data(spread_2s10s=120.0)  # No P&L change
         should_exit, reason = strategy.check_exit(data)
@@ -193,7 +193,7 @@ class TestExitRules:
         """Recent heartbeat → no timeout exit."""
         strategy.current_trade = CurveTradeType.FLATTENER
         strategy.entry_spread = 120.0
-        strategy.last_master_heartbeat = datetime.utcnow() - timedelta(minutes=10)
+        strategy.last_master_heartbeat = datetime.now(timezone.utc) - timedelta(minutes=10)
 
         data = make_data(spread_2s10s=115.0)  # Small favorable move
         should_exit, reason = strategy.check_exit(data)

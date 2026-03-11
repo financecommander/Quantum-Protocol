@@ -15,7 +15,7 @@ Connection:
 import logging
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Callable
 
@@ -360,7 +360,7 @@ class IBKRClient:
                 quantity=qty,
                 order_type=order_type.value,
                 status="Submitted",
-                submit_time=datetime.utcnow().isoformat(),
+                submit_time=datetime.now(timezone.utc).isoformat(),
             )
 
         except Exception as e:
@@ -448,7 +448,7 @@ class IBKRClient:
                 buying_power=values.get("BuyingPower", 0),
                 unrealized_pnl=values.get("UnrealizedPnL", 0),
                 realized_pnl=values.get("RealizedPnL", 0),
-                timestamp=datetime.utcnow().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(),
             )
         except Exception as e:
             logger.error(f"Account summary failed: {e}")

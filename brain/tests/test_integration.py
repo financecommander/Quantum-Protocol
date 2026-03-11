@@ -8,14 +8,14 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from orchestrator import Orchestrator, MarketState, SleeveAllocation, CrisisLevel
 
 
 def make_market(vix=15.0, spx=4500.0, tnx=4.2, es=4500.0, zn=110.0, zf=108.0, dxy=104.0):
     """Helper to create MarketState."""
     return MarketState(
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         vix=vix, spx=spx, tnx=tnx, dxy=dxy,
         es_price=es, zn_price=zn, zf_price=zf,
     )
@@ -38,9 +38,9 @@ class TestOrchestratorBasics:
         assert alloc.treasury_yield == 0.10
         assert alloc.compression_curve == 0.15
         assert alloc.prop_scaling == 0.45
-        assert alloc.rwa_infrastructure == 0.00  # Deferred
+        assert alloc.rwa_infrastructure == 0.10
         assert alloc.convexity_shield == 0.10
-        assert alloc.cash == 0.20
+        assert alloc.cash == 0.10
 
 
 class TestCrisisEvaluation:
@@ -216,7 +216,7 @@ class TestPermissionVectorIntegration:
         """Verify tick() actually broadcasts permission vector."""
         o = Orchestrator()
         market = MarketState(
-            timestamp=datetime.utcnow(), vix=15.0, spx=5000.0,
+            timestamp=datetime.now(timezone.utc), vix=15.0, spx=5000.0,
             tnx=42.0, dxy=104.0, es_price=5000.0,
             zn_price=110.0, zf_price=108.0,
         )

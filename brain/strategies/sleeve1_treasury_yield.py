@@ -49,7 +49,7 @@ Powered By: NERD MAINFRAME™ + SHIELD™
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -94,7 +94,7 @@ class YieldMarketData:
     yield_change_1d: float      # 1-day yield change (bps) for spike detection
     yield_std_20d: float        # 20-day rolling std of yield changes (bps)
     vix: float
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -181,7 +181,7 @@ class TreasuryYieldStrategy:
     def check_heartbeat_timeout(self) -> bool:
         if self._last_master_heartbeat is None:
             return False
-        elapsed = (datetime.utcnow() - self._last_master_heartbeat).total_seconds() / 60
+        elapsed = (datetime.now(timezone.utc) - self._last_master_heartbeat).total_seconds() / 60
         return elapsed > self.config.heartbeat_timeout_minutes
 
     # ─── Rebalance Check ────────────────────────────────────────
@@ -208,7 +208,7 @@ class TreasuryYieldStrategy:
         data = self._convert_market_data(market)
 
         # Record heartbeat
-        self._last_master_heartbeat = datetime.utcnow()
+        self._last_master_heartbeat = datetime.now(timezone.utc)
 
         # ─── Priority 1: Heartbeat timeout ──────────────────
         if self.check_heartbeat_timeout():
@@ -252,7 +252,7 @@ class TreasuryYieldStrategy:
             if not self._is_positioned or needs_rebal:
                 self._is_positioned = True
                 self._entry_yield = data.yield_10y
-                self._entry_date = datetime.utcnow()
+                self._entry_date = datetime.now(timezone.utc)
                 if needs_rebal:
                     self._days_since_rebalance = 0
                 action_note = "REBALANCE" if needs_rebal else "ENTRY"

@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "strategies", "aggregation"))
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from aggregation_engine import (
     AggregationEngine,
     AggregationConstraints,
@@ -31,7 +31,7 @@ from aggregation_engine import (
 @pytest.fixture
 def market_normal():
     return MarketState(
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         vix=15.0, spx=5800.0, tnx=4.2, dxy=104.0,
         es_price=5800.0, zn_price=110.5, zf_price=108.0,
     )
@@ -39,7 +39,7 @@ def market_normal():
 @pytest.fixture
 def market_crisis():
     return MarketState(
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         vix=45.0, spx=4800.0, tnx=3.5, dxy=98.0,
         es_price=4800.0, zn_price=115.0, zf_price=112.0,
     )

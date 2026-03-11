@@ -57,7 +57,7 @@ MERGED SPEC: Thesis rules + Convexity Shield redesign.
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
 
@@ -237,7 +237,7 @@ class ConvexityShieldStrategy:
         """Master heartbeat silent > 65 minutes → auto-liquidate."""
         if self._last_master_heartbeat is None:
             return False
-        elapsed = (datetime.utcnow() - self._last_master_heartbeat).total_seconds() / 60
+        elapsed = (datetime.now(timezone.utc) - self._last_master_heartbeat).total_seconds() / 60
         if elapsed > self.config.master_heartbeat_timeout_minutes:
             logger.critical(f"HEARTBEAT TIMEOUT: {elapsed:.0f}min since last heartbeat")
             return True
@@ -300,7 +300,7 @@ class ConvexityShieldStrategy:
         self._current_regime = regime
 
         # Record master heartbeat
-        self._last_master_heartbeat = datetime.utcnow()
+        self._last_master_heartbeat = datetime.now(timezone.utc)
 
         # ─── Priority 1: Heartbeat timeout → LIQUIDATE ──────
         if self.check_heartbeat_timeout():
