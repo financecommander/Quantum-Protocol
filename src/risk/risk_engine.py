@@ -1,37 +1,39 @@
+from typing import Dict, List
 import pandas as pd
 import numpy as np
-from typing import Dict, Optional
+from dataclasses import dataclass
+
+@dataclass
+class RiskMetrics:
+    var_95: float  # Value at Risk at 95% confidence
+    max_drawdown: float
+    current_exposure: float
 
 class RiskEngine:
-    def __init__(self, var_confidence: float = 0.95, max_drawdown: float = 0.1):
-        self.var_confidence = var_confidence
+    def __init__(self, historical_returns: pd.Series, max_var: float = 0.05, max_drawdown: float = 0.1):
+        self.historical_returns = historical_returns
+        self.max_var = max_var
         self.max_drawdown = max_drawdown
-        self.returns_history = pd.Series(dtype=float)
 
-    def calculate_var(self, portfolio_returns: pd.Series) -> float:
-        """
-        Calculate Value at Risk (VaR) for the portfolio.
-        """
-        if len(portfolio_returns) < 10:
+    def calculate_var(self, confidence: float = 0.95) -> float:
+        """Calculate Value at Risk for given confidence level."""
+        if len(self.historical_returns) == 0:
             return 0.0
-        return np.percentile(portfolio_returns, (1 - self.var_confidence) * 100)
+        return float(np.percentile(self.historical_returns, (1 - confidence) * 100))
 
-    def check_drawdown(self, equity_curve: pd.Series) -> bool:
-        """
-        Check if current drawdown exceeds maximum allowed.
-        """
-        if len(equity_curve) < 2:
-            return True
-        peak = equity_curve.cummax()
-        drawdown = (peak - equity_curve) / peak
-        return drawdown.max() <= self.max_drawdown
-
-    def position_size(self, symbol: str, signal_strength: float, volatility: float) -> float:
-        """
-        Calculate position size based on risk parameters and volatility.
-        """
-        risk_per_unit = volatility * signal_strength
-        if risk_per_unit == 0:
+    def calculate_drawdown(self) -> float:
+        """Calculate current drawdown from peak."""
+        if len(self.historical_returns) == 0:
             return 0.0
-        target_risk = 0.01  # 1% portfolio risk per position
-        return target_risk / risk_per_unit * 1000  # Scaled position size
+        cumulative = (1 + self.historical_returns).cumprod()
+        peak = cumulative.cummax()
+        drawdown = (cumulative - peak) / peak
+        return float(drawdown.min())
+
+    def position_sizing(self, signal_strength: float, current_exposure: float) -> float:
+        """Adjust position size based on risk metrics."""
+        var = self.calculate_var()
+        if var < -self.max_var:
+            return 0.0  # No position if VaR exceeds limit
+        risk_adjusted_size = signal_strength * (1 - abs(var) / self.max_var)
+        return min(risk_adjusted_size, 1.0 - current_exposure)

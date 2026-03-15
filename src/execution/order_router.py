@@ -1,42 +1,53 @@
 from typing import Dict, List, Optional
 import asyncio
+from dataclasses import dataclass
+
+@dataclass
+class Order:
+    symbol: str
+    quantity: float
+    side: str  # 'buy' or 'sell'
+    venue: Optional[str] = None
+    price: Optional[float] = None
 
 class OrderRouter:
-    def __init__(self, venues: List[str], slippage_threshold: float = 0.001):
+    def __init__(self, venues: List[str]):
         self.venues = venues
-        self.slippage_threshold = slippage_threshold
-        self.venue_latency = {venue: 0.1 for venue in venues}  # Mock latency in seconds
-        self.venue_costs = {venue: 0.0002 for venue in venues}  # Mock fee rate
+        self.venue_latency = {venue: 0.1 for venue in venues}  # Mock latency
+        self.venue_liquidity = {venue: 1.0 for venue in venues}  # Mock liquidity
 
-    async def route_order(self, symbol: str, qty: float, side: str) -> Dict:
-        """
-        Route order to the best venue based on latency, cost, and slippage.
-        """
-        best_venue = self._select_best_venue(symbol)
-        if not best_venue:
-            raise ValueError(f"No suitable venue found for {symbol}")
+    async def route_order(self, order: Order) -> Dict[str, any]:
+        """Smart route order to best venue based on latency and liquidity."""
+        if order.venue:
+            selected_venue = order.venue
+        else:
+            selected_venue = self._select_best_venue(order.symbol)
 
-        # Simulate order execution with slippage check
-        slippage = self._estimate_slippage(symbol, qty, best_venue)
-        if slippage > self.slippage_threshold:
-            raise ValueError(f"Slippage {slippage} exceeds threshold {self.slippage_threshold}")
+        # Simulate slippage based on venue liquidity
+        slippage = self._calculate_slippage(order.quantity, selected_venue)
+        execution_price = order.price * (1 + slippage) if order.price else None
+
+        # TODO: Connect to actual venue API for order submission
+        await asyncio.sleep(0.1)  # Simulate async network delay
 
         return {
-            "venue": best_venue,
-            "symbol": symbol,
-            "qty": qty,
-            "side": side,
-            "status": "routed",
-            "slippage": slippage
+            "order_id": f"mock_{id(order)}",
+            "symbol": order.symbol,
+            "quantity": order.quantity,
+            "side": order.side,
+            "venue": selected_venue,
+            "execution_price": execution_price
         }
 
-    def _select_best_venue(self, symbol: str) -> Optional[str]:
-        # Simple selection based on lowest combined latency and cost
-        scores = {v: self.venue_latency[v] * 0.6 + self.venue_costs[v] * 0.4 for v in self.venues}
-        return min(scores, key=scores.get) if scores else None
+    def _select_best_venue(self, symbol: str) -> str:
+        """Select venue with best liquidity and lowest latency."""
+        scores = {
+            venue: (1 / self.venue_latency[venue]) * self.venue_liquidity[venue]
+            for venue in self.venues
+        }
+        return max(scores, key=scores.get)
 
-    def _estimate_slippage(self, symbol: str, qty: float, venue: str) -> float:
-        # Mock slippage estimation based on qty and venue
-        base_slippage = 0.0005
-        qty_factor = qty / 10000  # Arbitrary scaling
-        return base_slippage + qty_factor * 0.0001
+    def _calculate_slippage(self, quantity: float, venue: str) -> float:
+        """Calculate slippage based on quantity and venue liquidity."""
+        liquidity = self.venue_liquidity[venue]
+        return 0.001 * (quantity / liquidity)  # Simplified slippage model
