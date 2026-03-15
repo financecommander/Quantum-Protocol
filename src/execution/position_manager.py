@@ -1,44 +1,44 @@
-from typing import Dict, List, Optional
-from dataclasses import dataclass
+from typing import Dict, List
 import pandas as pd
 
-@dataclass
-class Position:
-    symbol: str
-    quantity: float
-    entry_price: float
-    side: str
-    entry_time: str
-
 class PositionManager:
-    def __init__(self, max_position_size: float = 100000.0):
-        self.positions: Dict[str, Position] = {}
+    def __init__(self, max_position_size: float = 1000000.0, max_risk_per_trade: float = 0.02):
+        self.positions: Dict[str, Dict] = {}
         self.max_position_size = max_position_size
-        self.pnl_history: List[Dict] = []
+        self.max_risk_per_trade = max_risk_per_trade
+        self.pnl_history = pd.DataFrame(columns=["timestamp", "symbol", "pnl"])
 
-    def update_position(self, symbol: str, quantity: float, price: float, side: str, timestamp: str) -> bool:
-        """Update or create a position with risk checks."""
-        if not self._check_risk_limits(symbol, quantity, price):
+    def update_position(self, symbol: str, qty: float, price: float, side: str) -> bool:
+        if not self._check_risk_limits(symbol, qty, price):
             return False
 
-        if symbol in self.positions and quantity == 0:
-            del self.positions[symbol]
-        else:
-            self.positions[symbol] = Position(symbol, quantity, price, side, timestamp)
-        self._update_pnl(price, timestamp)
+        if symbol not in self.positions:
+            self.positions[symbol] = {"qty": 0.0, "avg_price": 0.0, "entry_value": 0.0}
+
+        pos = self.positions[symbol]
+        if side == "buy":
+            new_qty = pos["qty"] + qty
+            new_value = pos["entry_value"] + (qty * price)
+            pos["avg_price"] = new_value / new_qty if new_qty != 0 else 0
+            pos["qty"] = new_qty
+            pos["entry_value"] = new_value
+        else:  # sell
+            pos["qty"] -= qty
+            if pos["qty"] == 0:
+                pos["avg_price"] = 0
+                pos["entry_value"] = 0
         return True
 
-    def get_pnl(self) -> float:
-        """Calculate real-time P&L across all positions."""
-        return sum(pnl['value'] for pnl in self.pnl_history) if self.pnl_history else 0.0
+    def calculate_pnl(self, symbol: str, current_price: float) -> float:
+        if symbol not in self.positions or self.positions[symbol]["qty"] == 0:
+            return 0.0
+        pos = self.positions[symbol]
+        return pos["qty"] * (current_price - pos["avg_price"])
 
-    def _check_risk_limits(self, symbol: str, quantity: float, price: float) -> bool:
-        """Check if position size exceeds limits."""
-        total_value = quantity * price
-        return total_value <= self.max_position_size
-
-    def _update_pnl(self, current_price: float, timestamp: str):
-        """Update P&L history for tracking."""
-        # TODO: Fetch real market price for accurate P&L
-        mock_pnl = sum(pos.quantity * (current_price - pos.entry_price) for pos in self.positions.values())
-        self.pnl_history.append({"timestamp": timestamp, "value": mock_pnl})
+    def _check_risk_limits(self, symbol: str, qty: float, price: float) -> bool:
+        trade_value = qty * price
+        if trade_value > self.max_position_size:
+            return False
+        if trade_value > self.max_risk_per_trade * self.max_position_size:
+            return False
+        return True

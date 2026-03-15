@@ -6,38 +6,29 @@ app = FastAPI(title="Quantum Protocol Trading API")
 
 class OrderRequest(BaseModel):
     symbol: str
-    quantity: float
+    qty: float
     side: str
 
-# Mock data stores - replace with actual services
+# Mock data stores
 positions = {}
-pnl = 0.0
+pnl_data = {}
 risk_metrics = {"var": 0.0, "drawdown": 0.0}
 
 @app.post("/orders")
 async def place_order(order: OrderRequest):
-    """Place a trading order."""
-    if order.quantity <= 0:
+    if order.qty <= 0:
         raise HTTPException(status_code=400, detail="Quantity must be positive")
-    # TODO: Integrate with OrderRouter for actual execution
-    return {
-        "status": "executed",
-        "symbol": order.symbol,
-        "quantity": order.quantity,
-        "side": order.side
-    }
+    # TODO: Integrate with OrderRouter
+    return {"status": "order placed", "symbol": order.symbol, "qty": order.qty, "side": order.side}
 
 @app.get("/positions")
-async def get_positions() -> Dict:
-    """Get current positions."""
+async def get_positions():
     return positions
 
 @app.get("/pnl")
-async def get_pnl() -> float:
-    """Get current P&L."""
-    return pnl
+async def get_pnl():
+    return pnl_data
 
 @app.get("/risk")
-async def get_risk_metrics() -> Dict:
-    """Get current risk metrics."""
+async def get_risk_metrics():
     return risk_metrics

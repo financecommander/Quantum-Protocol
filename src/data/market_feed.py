@@ -1,38 +1,31 @@
 import asyncio
 from typing import Dict, Callable, Any
-import json
+import websockets
 
 class MarketFeed:
-    def __init__(self, venues: list[str] = ["binance", "alpaca"]):
-        self.venues = venues
-        self.subscriptions: Dict[str, Callable] = {}
+    def __init__(self, ws_url: str = "wss://stream.binance.com:9443/ws"):
+        self.ws_url = ws_url
+        self.subscriptions = set()
+        self.handlers: Dict[str, Callable] = {}
         self.is_running = False
 
     async def connect(self):
-        """Simulate WebSocket connection to market data venues."""
         self.is_running = True
-        print(f"Connected to {self.venues}")
-        # TODO: Implement actual WebSocket connection for Binance/Alpaca
-        while self.is_running:
-            await asyncio.sleep(1)
-            self._simulate_data_stream()
+        async with websockets.connect(self.ws_url) as websocket:
+            while self.is_running:
+                data = await websocket.recv()
+                await self._process_data(data)
 
-    def subscribe(self, symbol: str, callback: Callable[[Dict], None]):
-        """Subscribe to market data for a symbol."""
-        self.subscriptions[symbol] = callback
+    async def subscribe(self, symbol: str, handler: Callable[[Any], None]):
+        self.subscriptions.add(symbol)
+        self.handlers[symbol] = handler
+        # TODO: Send subscription message to WebSocket
 
-    def _simulate_data_stream(self):
-        """Simulate incoming market data."""
-        for symbol, callback in self.subscriptions.items():
-            mock_data = {
-                "symbol": symbol,
-                "price": 100.0 + hash(symbol) % 10,
-                "volume": 1000.0,
-                "timestamp": "now"
-            }
-            callback(mock_data)
+    async def _process_data(self, data: Any):
+        # Parse incoming data (mocked for now)
+        symbol = "BTCUSDT"  # Extract from data in real implementation
+        if symbol in self.handlers:
+            await self.handlers[symbol](data)
 
-    async def disconnect(self):
-        """Disconnect from market data feeds."""
+    def stop(self):
         self.is_running = False
-        print("Disconnected from market feeds")
