@@ -15,12 +15,18 @@ quantum-protocol-polyagent/
 │   ├── crisis_protocol_agent.py        # Autonomous crisis detection
 │   ├── treasury_basis_agent.py         # Sleeve 1: Treasury arbitrage
 │   ├── vol_regime_agent.py             # Sleeve 2: Volatility classification
+│   ├── prop_scaling_agent.py           # Sleeve 3: Prop account synchronization
+│   ├── rwa_crypto_agent.py             # Sleeve 4: RWA/Crypto cross-venue arbitrage
+│   ├── tail_hedging_agent.py           # Sleeve 5: Tail risk hedging
 │   ├── orchestrator.py                 # Main agent coordinator
 │   │
 │   ├── tools/                          # Agent tool implementations
 │   │   ├── __init__.py
 │   │   ├── crisis_tools.py             # evaluate_crisis(), log_transition()
 │   │   ├── sleeve_tools.py             # compute_treasury_basis(), compute_vol_regime()
+│   │   ├── prop_scaling_tools.py       # handle_master_fill(), sync_accounts()
+│   │   ├── rwa_crypto_tools.py         # scan_opportunities(), execute_arb()
+│   │   ├── tail_hedging_tools.py       # update_vix_ema(), rebalance_hedges()
 │   │   ├── audit_tools.py              # FINRA 3110 compliance logging
 │   │   └── market_data_tools.py        # fetch_vix(), compute_depeg()
 │   │
@@ -74,7 +80,7 @@ quantum-protocol-polyagent/
 │   ├── __init__.py
 │   │
 │   ├── unit/                           # Unit tests (port from Rust)
-│   │   ├── test_crisis_protocols.py    # Port from src/engine/tests.rs:84-115
+│   │   ├── test_crisis_protocols.py    # Port from src/engine/tests.rs:83-115
 │   │   ├── test_sleeve_signals.py      # Port from src/engine/tests.rs:120-185
 │   │   ├── test_audit_ring.py          # Port from src/engine/tests.rs:248-285
 │   │   └── test_config.py              # Port from src/engine/tests.rs:315-322
@@ -145,7 +151,7 @@ quantum-protocol-polyagent/
 - Unit tests for every agent tool
 - Integration tests for agent coordination
 - E2E tests for full pipeline (market data → agents → dashboard)
-- Port all 26 Rust unit tests to Python
+- Port all 196 Rust tests to Python (26 core engine + 170 across sleeves/modules)
 
 ### 3. **Observability**
 - All agent decisions logged to GCP Cloud Logging
@@ -248,7 +254,7 @@ quantum-protocol-polyagent/
 ## Success Metrics
 
 ✅ **Migration is successful if:**
-1. All 26 Rust unit tests pass in Python
+1. All 196 Rust tests pass in Python equivalents
 2. Terra Luna Replay test validates crisis protocols
 3. Agent latency p99 < 500ms
 4. Streamlit dashboard displays real-time decisions

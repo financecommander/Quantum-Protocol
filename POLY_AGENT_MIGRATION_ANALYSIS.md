@@ -21,7 +21,7 @@ This codebase is **exceptionally well-architected** and demonstrates a rare leve
 
 ### Critical Concurrency Components Identified
 
-#### 1.1 SPSC Ring Buffer (`src/engine/main.rs:64-137`)
+#### 1.1 SPSC Ring Buffer (`src/engine/mod.rs:24-81`)
 ```rust
 pub struct RingBuffer {
     buffer: Box<[MarketPacket; RING_BUFFER_SIZE]>,  // 16,384 slots
@@ -39,7 +39,7 @@ pub struct RingBuffer {
 - **Why:** Vertex AI Agents don't need microsecond latency. The SPSC ring is solving a problem (UDP multicast ingestion) that doesn't exist in a Streamlit/API-driven system.
 - **Replacement Strategy:** Python `queue.Queue` or async message queue (RabbitMQ, Pub/Sub) with 10-100ms latency is acceptable.
 
-#### 1.2 Audit Ring (`src/engine/main.rs:145-202`)
+#### 1.2 Audit Ring (`src/engine/common.rs:78-135`)
 ```rust
 pub struct AuditRing {
     buffer: Box<[AuditRecord; AUDIT_RING_SIZE]>,  // 4,096 slots
@@ -59,7 +59,7 @@ pub struct AuditRing {
   - OR stream directly to GCP Cloud Logging / BigQuery for WORM compliance
   - Bonus: Easier integration with Splunk/Datadog for real-time monitoring
 
-#### 1.3 Shared Memory Config (`src/engine/main.rs:208-233`)
+#### 1.3 Shared Memory Config (`src/engine/common.rs:143-165`)
 ```rust
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
@@ -93,15 +93,18 @@ pub struct SharedConfig {
 
 **Detailed Analysis:**
 
-1. **The "Hot Path" is a Myth:**
-   - The `on_tick()` function (lines 325-373) is advertised as "NO ALLOCATIONS"
-   - But it only executes **two arithmetic functions:**
+1. **The Core "Hot Path" is Simple:**
+   - The `on_tick()` function (lines 173-222 in mod.rs) is advertised as "NO ALLOCATIONS"
+   - The core loop executes **two arithmetic functions:**
      ```rust
      let tb_signal = sleeve_treasury_basis(packet, &config);  // 5 operations
      let vol_signal = sleeve_vol_regime(packet, &config);     // 3 operations
      ```
-   - **Total complexity: O(1) with ~8 FLOPs**
-   - This is not "high-frequency trading" — it's **high-frequency signal classification**
+   - However, the engine also has **3 additional sleeves** with more complex logic:
+     - **Prop Scaling** (`prop_scaling.rs`, 596 lines): 32-account synchronization with auto-hedging
+     - **RWA/Crypto HFT** (`rwa_crypto_hft.rs`, 464 lines): Cross-venue arbitrage detection (16 pairs)
+     - **Tail Hedging** (`tail_hedging.rs`, 544 lines): VIX EMA tracking, hedge rebalancing
+   - These are independently portable as modular Python agents
 
 2. **No Shared Mutable State:**
    - The ring buffers are **single-threaded** (SPSC by design)
@@ -145,7 +148,7 @@ class QuantumProtocolAgent:
         }
 ```
 
-**Verdict:** The entire "Iron Core" can be replaced with **~50 lines of Python** without any concurrency primitives.
+**Verdict:** The core "Iron Core" crisis/sleeve logic can be replaced with **~50 lines of Python**. The full 5-sleeve system (including Prop Scaling, RWA/Crypto, Tail Hedging) requires **~500 lines of Python**, with each sleeve mapping to an independent Vertex AI Agent tool.
 
 ---
 
@@ -159,8 +162,11 @@ class QuantumProtocolAgent:
 | `sleeve_treasury_basis()` | 6 | 1 clamp() | `def sleeve_treasury_basis(spread, fair_value): return clamp(spread - fair_value * 0.001, -1.0, 1.0)` |
 | `sleeve_vol_regime()` | 10 | 2 conditionals | `def sleeve_vol_regime(vix, low, high): return -1.0 if vix < low else 1.0 if vix > high else 0.0` |
 | `on_tick()` | 48 | Orchestration | **Directly maps to Vertex AI Agent tool calls** |
+| `PropScalingEngine` | 596 | 32-account sync | Stateful Python class with account management |
+| `RwaCryptoEngine` | 464 | Arb detection | Python class with opportunity scanning |
+| `TailHedgingEngine` | 544 | VIX EMA + hedging | Python class with EMA tracking and rebalancing |
 
-**Verdict:** ✅ **100% PORTABLE to Python**
+**Verdict:** ✅ **100% PORTABLE to Python** — Core functions are trivial; additional sleeves are stateful but modular
 
 ### 2.2 Python Tool API Design
 
@@ -236,6 +242,14 @@ def compute_vol_regime_signal(vix: float, low_threshold: float, high_threshold: 
 [dependencies]
 log = "0.4"
 env_logger = "0.11"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+notify = "7.0"
+futures-util = "0.3"
+regex = "1"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -245,7 +259,8 @@ criterion = { version = "0.5", features = ["html_reports"] }
 - **ZERO** kernel bypass dependencies (no `solarflare`, no `ef_vi`)
 - **ZERO** hardware-specific libraries
 - **ZERO** compiled binaries for order execution
-- Only logging and benchmarking — **100% pure Rust**
+- Standard async ecosystem: tokio, serde, WebSocket, file watching — all have Python equivalents
+- No proprietary or binary-only dependencies
 
 **Verdict:** ✅ **NO DEPENDENCY HELL**
 
@@ -299,9 +314,9 @@ The README mentions but **does NOT implement**:
 
 **The reality:**
 - The benchmark (`benches/latency_bench.rs`) measures **in-process function execution**, not network latency
-- There is **NO UDP socket code** in `main()`
-- There is **NO order execution** — only signal calculation
-- The "hot path" is 8 floating-point operations
+- There IS UDP socket code in `main()` (`src/engine/main.rs:26-62`) — it binds a UDP socket and processes incoming packets
+- However, there is **NO order execution** — only signal calculation and audit logging
+- The core "hot path" (`on_tick`) performs crisis evaluation and sleeve signal computation
 
 **Conclusion:** This is **aspirational architecture** without production infrastructure.
 
@@ -402,7 +417,9 @@ You are migrating a Rust-based High-Frequency Trading engine to a Python Poly-Ag
 ## Source Repository
 - GitHub: `financecommander/Quantum-Protocol`
 - Key Files:
-  - `src/engine/main.rs` — Rust trading engine (450 lines)
+  - `src/engine/mod.rs` — Core engine logic (243 lines: ring buffer, crisis protocols, sleeves, tick processing)
+  - `src/engine/main.rs` — Binary entry point (69 lines: UDP ingestion loop)
+  - `src/engine/common.rs` — Shared types (258 lines: MarketPacket, AuditRing, SharedConfig)
   - `src/dashboard/app.py` — FastAPI dashboard (222 lines)
   - `tests/terra_luna_replay.py` — Crisis protocol test (151 lines)
 
@@ -410,7 +427,7 @@ You are migrating a Rust-based High-Frequency Trading engine to a Python Poly-Ag
 Rewrite the core trading logic as a **Vertex AI Agent system** with the following components:
 
 ### 1. Crisis Protocol Agent
-**Source:** `src/engine/main.rs:245-268` (function `evaluate_crisis`)
+**Source:** `src/engine/mod.rs:95-103` (function `evaluate_crisis`)
 
 **Task:** Convert to a Vertex AI Agent tool that:
 - Takes market data as input (`vix`, `depeg_pct`)
@@ -431,7 +448,7 @@ Rewrite the core trading logic as a **Vertex AI Agent system** with the followin
 ---
 
 ### 2. Trading Sleeve Agents
-**Source:** `src/engine/main.rs:263-279` (functions `sleeve_treasury_basis`, `sleeve_vol_regime`)
+**Source:** `src/engine/mod.rs:111-137` (functions `sleeve_treasury_basis`, `sleeve_vol_regime`)
 
 **Task:** Convert to two separate Vertex AI Agent tools:
 
@@ -482,7 +499,7 @@ def compute_vol_regime_signal(
 ---
 
 ### 3. Agent Orchestrator
-**Source:** `src/engine/main.rs:325-373` (function `on_tick`)
+**Source:** `src/engine/mod.rs:173-222` (function `on_tick`)
 
 **Task:** Create the main agent loop that:
 1. Receives market data via GCP Pub/Sub
@@ -599,7 +616,7 @@ class QuantumProtocolOrchestrator:
 ### 6. Testing Strategy
 
 **Port all tests from Rust to Python:**
-- `test_crisis_protocols()` ← `src/engine/tests.rs:84-115`
+- `test_crisis_protocols()` ← `src/engine/tests.rs:83-115`
 - `test_sleeve_signals()` ← `src/engine/tests.rs:120-185`
 - `test_terra_luna_replay()` ← `tests/terra_luna_replay.py` (already Python!)
 
@@ -643,7 +660,7 @@ class QuantumProtocolOrchestrator:
 ### 9. Success Criteria
 
 The migration is successful if:
-1. ✅ All 26 Rust unit tests pass in Python
+1. ✅ All 196 Rust tests pass in Python equivalents
 2. ✅ Terra Luna Replay test passes (crisis protocols work correctly)
 3. ✅ Streamlit dashboard displays real-time agent decisions
 4. ✅ Audit logs meet FINRA 3110 requirements
@@ -727,7 +744,7 @@ This codebase is a **perfect candidate** for Poly-Agent migration because:
 2. ✅ **100% Logic Portability** — All algorithms are pure functions that translate directly to Python
 3. ✅ **No Dependency Hell** — No kernel bypass, no compiled binaries, no exotic libraries
 4. ✅ **70% Already Python** — The dashboard and tests are already in Python and working
-5. ✅ **Simple Core Logic** — The "Iron Core" is 8 floating-point operations, not a million-line HFT engine
+5. ✅ **Modular Core Logic** — The "Iron Core" consists of crisis evaluation (VIX/depeg thresholds), spread-based signal generation, and 5 independently portable sleeves including prop account sync, cross-venue arbitrage, and VIX-based hedge rebalancing (~3,500 lines total)
 
 **The Opus 4.6 Advantage:**
 - Can handle the "complex" Rust patterns (atomics, ring buffers) and distill them to simple Python

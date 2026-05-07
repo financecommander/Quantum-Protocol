@@ -20,11 +20,13 @@ You are migrating a **Rust-based High-Frequency Trading engine** to a **Python P
 ## 📦 Source Files to Migrate
 
 ### 1. Core Trading Engine (Rust)
-**File:** `src/engine/main.rs` (450 lines)
+**File:** `src/engine/mod.rs` (243 lines — core engine logic: ring buffer, crisis protocols, sleeves, tick processing)
+**File:** `src/engine/main.rs` (69 lines — binary entry point with UDP ingestion loop)
+**File:** `src/engine/common.rs` (258 lines — shared types: MarketPacket, AuditRing, SharedConfig)
 
 **Key Functions:**
 ```rust
-// Crisis evaluation (lines 245-258)
+// Crisis evaluation (mod.rs lines 95-103)
 pub fn evaluate_crisis(packet: &MarketPacket) -> CrisisState {
     if packet.vix > 45.0 {
         CrisisState::SmartBunker
@@ -35,14 +37,14 @@ pub fn evaluate_crisis(packet: &MarketPacket) -> CrisisState {
     }
 }
 
-// Treasury basis signal (lines 263-268)
+// Treasury basis signal (mod.rs lines 111-116)
 pub fn sleeve_treasury_basis(packet: &MarketPacket, config: &SharedConfig) -> f64 {
     let spread = packet.ask - packet.bid;
     let fair_value = packet.last * config.hedge_ratio;
     (spread - fair_value * 0.001).clamp(-1.0, 1.0)
 }
 
-// Volatility regime signal (lines 273-279)
+// Volatility regime signal (mod.rs lines 129-137)
 pub fn sleeve_vol_regime(packet: &MarketPacket, config: &SharedConfig) -> f64 {
     if packet.vix < config.vol_regime_threshold_low {
         -1.0  // risk-on
@@ -53,7 +55,7 @@ pub fn sleeve_vol_regime(packet: &MarketPacket, config: &SharedConfig) -> f64 {
     }
 }
 
-// Main tick processor (lines 325-373)
+// Main tick processor (mod.rs lines 173-222)
 impl Engine {
     pub fn on_tick(&mut self, packet: &MarketPacket) {
         // 1. Evaluate crisis
@@ -127,7 +129,7 @@ def evaluate_crisis(vix: float, depeg_pct: float) -> CrisisState:
     FINRA Compliance: This function triggers audit logging per FINRA 3110.
     """
     # YOUR CODE HERE
-    # Port exact logic from Rust (lines 245-258)
+    # Port exact logic from Rust (mod.rs lines 95-103)
     pass
 
 def log_crisis_transition(
@@ -161,7 +163,7 @@ def compute_treasury_basis_signal(
     """
     Calculate treasury basis arbitrage signal.
     
-    Formula (from Rust lines 263-268):
+    Formula (from Rust mod.rs lines 111-116):
         spread = ask - bid
         fair_value = last * hedge_ratio
         signal = clamp(spread - fair_value * 0.001, -1.0, 1.0)
@@ -192,7 +194,7 @@ def compute_vol_regime_signal(
     """
     Classify volatility regime for risk management.
     
-    Logic (from Rust lines 273-279):
+    Logic (from Rust mod.rs lines 129-137):
         if vix < low_threshold: -1.0 (risk-on)
         elif vix > high_threshold: 1.0 (risk-off)
         else: 0.0 (neutral)
@@ -231,7 +233,7 @@ class QuantumProtocolOrchestrator:
     """
     Main agent coordinator that replicates Rust Engine::on_tick() logic.
     
-    Orchestration Flow (from Rust lines 325-373):
+    Orchestration Flow (from Rust mod.rs lines 173-222):
     1. Evaluate crisis state
     2. Log crisis transitions
     3. If SmartBunker: skip sleeve processing
@@ -261,7 +263,7 @@ class QuantumProtocolOrchestrator:
             }
         """
         # YOUR CODE HERE
-        # Port exact logic from Rust Engine::on_tick() (lines 325-373)
+        # Port exact logic from Rust Engine::on_tick() (mod.rs lines 173-222)
         pass
     
     def _load_config(self) -> Dict:
@@ -591,7 +593,7 @@ class AuditLogger:
 
 The migration is **SUCCESSFUL** if:
 
-1. ✅ All 26 Rust unit tests pass in Python
+1. ✅ All 196 Rust tests pass in Python equivalents
 2. ✅ Terra Luna Replay test passes (crisis protocols work)
 3. ✅ Agent latency p99 < 500ms (within budget)
 4. ✅ Streamlit dashboard displays real-time agent decisions
@@ -630,7 +632,7 @@ The migration is **SUCCESSFUL** if:
    - No buy/sell signals (CTA exemption)
 
 3. ✅ **Test Suite** (`tests/`)
-   - Port all 26 Rust unit tests
+   - Port all 196 Rust tests (26 core engine + 170 across sleeves/modules)
    - Add Vertex AI integration tests
    - Ensure Terra Luna Replay passes
 
@@ -674,9 +676,10 @@ The migration is **SUCCESSFUL** if:
 
 1. **Pure Functions:** Rust code is already decomposed into stateless functions
 2. **No Real Concurrency:** SPSC rings are single-threaded, no distributed locks
-3. **Simple Logic:** Only 8 FLOPs in the hot path (trivial to port)
-4. **70% Already Python:** Dashboard and tests already exist
-5. **No Exotic Dependencies:** No kernel bypass, no hardware-specific code
+3. **Core Logic is Simple:** Crisis evaluation and 2 core sleeve signals are straightforward conditionals/arithmetic
+4. **Additional Sleeves are Self-Contained:** Prop Scaling (596 lines), RWA/Crypto HFT (464 lines), and Tail Hedging (544 lines) are modular and independently portable
+5. **70% Already Python:** Dashboard and tests already exist
+6. **No Exotic Dependencies:** No kernel bypass, no hardware-specific code
 
 ---
 
@@ -684,7 +687,10 @@ The migration is **SUCCESSFUL** if:
 
 **What to Preserve:**
 - ✅ Exact crisis evaluation logic
-- ✅ Sleeve signal formulas
+- ✅ Sleeve signal formulas (Treasury Basis, Vol Regime)
+- ✅ Prop Scaling engine logic (32-account synchronization)
+- ✅ RWA/Crypto HFT arbitrage detection logic
+- ✅ Tail Hedging engine (VIX EMA, hedge rebalancing)
 - ✅ Audit trail structure
 - ✅ Terra Luna Replay test
 
